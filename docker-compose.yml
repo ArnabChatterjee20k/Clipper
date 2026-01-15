@@ -1,0 +1,18 @@
+services:
+  ffmpeg: 
+    image: linuxserver/ffmpeg:8.0.1
+    restart: always
+
+  imagemagick:
+    image: dpokidov/imagemagick:7.1.1-47-bullseye
+    restart: always
+
+  postgres:
+    image: postgres:18.1-bookworm
+    restart: always
+    environment:
+      - POSTGRES_DB=clipper
+      - POSTGRES_USER=clipper
+      - POSTGRES_PASSWORD=clipper
+    ports:
+      - "5432:5432"
