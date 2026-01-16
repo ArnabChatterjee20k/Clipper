@@ -1,11 +1,13 @@
 services:
-  ffmpeg: 
-    image: linuxserver/ffmpeg:8.0.1
-    restart: always
-
-  imagemagick:
-    image: dpokidov/imagemagick:7.1.1-47-bullseye
-    restart: always
+  clipper:
+    build:
+      context: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./media:/code/media
+    depends_on:
+      - postgres
 
   postgres:
     image: postgres:18.1-bookworm

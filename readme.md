@@ -5,7 +5,7 @@ A MVP of an editor for locally editing medias via http request
 db -> postgres  
 queue -> postgres only since everything would be step actions
 server -> python fastapi
-tools -> ffmpeg and imagegick
+tools -> ffmpeg and PIL
 storage -> minio3
 Observability & Telemetry -> grafana and promtetheus
 
