@@ -1,6 +1,6 @@
 # About
 A MVP of an editor for locally editing medias via http request
-
+No auth
 # Tech
 db -> postgres  
 queue -> postgres only since everything would be step actions
