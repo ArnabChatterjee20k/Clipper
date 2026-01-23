@@ -34,8 +34,23 @@ resource -> edit
 * Video -> trim, format
 
 ### Workflow
-* An editing will be a session and each edit will create a new file so that we can go back and forth
-* Every edit requests will be queued and will be assigned an id to be queried against
+* Worker side
+worker gonna poll postgres
+filter
+status = processing 
+order by created_at
+add the action and mark status as processing then completed
+correctly impose the trial
+
+* User side
+user uploaded video
+upload the video first to a bucket
+start a session with the file
+user start editing
+add pg entry with status queued and action
+
+Using simple polling 
+For notfication on completion to the suer using listen/notify
 
 # TODO
 A command registration system for builidng commands via a cms

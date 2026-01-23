@@ -1,8 +1,9 @@
 import io
 from typing import Union, Annotated
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile, Request, Depends
 from fastapi.responses import JSONResponse
 from modules.buckets import load_buckets, upload_file
+from modules.db import DBSession, load_schemas
 from modules.responses import FileResponse
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifecycle(app):
     await load_buckets()
+    await load_schemas()
     yield
 
 
@@ -27,7 +29,7 @@ async def exception_handler(request: Request, call_next):
 
 # bucket/files
 @app.post("/bucket/upload")
-async def upload_file_to_bucket(file: Annotated[UploadFile, File()]):
+async def upload_file_to_bucket(file: Annotated[UploadFile, File()], db: DBSession):
     out_file = io.BytesIO(await file.read())
     out_file.name = file.filename
     await upload_file(out_file)
