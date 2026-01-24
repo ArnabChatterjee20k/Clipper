@@ -53,4 +53,7 @@ Using simple polling
 For notfication on completion to the suer using listen/notify
 
 # TODO
-A command registration system for builidng commands via a cms
+* User will be able to create their workflows and save them in the yaml file or in the db with the steps mentioned
+
+### FFMPEG guide
+http://img.ly/blog/ultimate-guide-to-ffmpeg/

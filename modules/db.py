@@ -11,6 +11,7 @@ class JobStatus(enum.Enum):
     QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed"
+    CANCELLED = "cancelled"
 
 
 async def get_db():
@@ -43,11 +44,11 @@ class File:
 
 @dataclass
 class Job:
-    id: Optional[int] = field(init=False, default=-1)
     filename: str
     filetype: str
     action: dict
     status: str
+    id: Optional[int]
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
     version: int = 0
