@@ -2,8 +2,10 @@ import io
 from typing import Union, Annotated
 from fastapi import FastAPI, File, UploadFile, Request, Depends
 from fastapi.responses import JSONResponse
-from modules.buckets import load_buckets, upload_file
-from modules.db import DBSession, load_schemas
+from modules.logger import logger
+from modules.buckets import load_buckets, upload_file, PRIMARY_BUCKET
+from modules.db import DBSession, load_schemas, create, File as FileModel
+from dataclasses import asdict
 from modules.responses import FileResponse
 from contextlib import asynccontextmanager
 
@@ -23,17 +25,24 @@ async def exception_handler(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as e:
-        print(str(e))
+        logger.error(e)
         return JSONResponse(content="Something went wrong", status_code=500)
 
 
 # bucket/files
 @app.post("/bucket/upload")
 async def upload_file_to_bucket(file: Annotated[UploadFile, File()], db: DBSession):
-    out_file = io.BytesIO(await file.read())
-    out_file.name = file.filename
-    await upload_file(out_file)
-    return FileResponse(type=file.content_type, filename=file.filename)
+    # TODO: restrict to image/videos only
+    async with db.transaction():
+        file_id = await create(
+            db,
+            "files",
+            **asdict(FileModel(name=file.filename, bucketname=PRIMARY_BUCKET)),
+        )
+        out_file = io.BytesIO(await file.read())
+        out_file.name = file.filename
+        await upload_file(out_file)
+    return FileResponse(type=file.content_type, filename=file.filename, file_id=file_id)
 
 
 @app.get("/bucket/")
