@@ -1,7 +1,7 @@
 from .logger import logger
 import enum
 from dataclasses import dataclass, field
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Literal
 from datetime import datetime
 from fastapi import Depends
 import asyncpg
@@ -21,6 +21,9 @@ async def get_db():
 
 
 DBSession = Annotated[asyncpg.Connection, Depends(get_db)]
+
+CONDITION = Literal["AND", "OR"]
+TABLE = Literal["buckets", "files", "jobs"]
 
 
 @dataclass
@@ -52,6 +55,7 @@ class Job:
     retries: int = 0
 
 
+# TODO: add indexes
 async def load_schemas():
     async for db in get_db():
         logger.info("creating buckets table")
@@ -93,7 +97,7 @@ async def load_schemas():
         logger.info("jobs table created")
 
 
-async def create(db: asyncpg.Connection, table: str, **records) -> int:
+async def create(db: asyncpg.Connection, table: TABLE, **records) -> int:
     if "id" in records:
         records.pop("id")
     columns, values_placeholder, values = prepare(records)
@@ -104,10 +108,10 @@ async def create(db: asyncpg.Connection, table: str, **records) -> int:
 
 async def update(
     db: asyncpg.Connection,
-    table: str,
+    table: TABLE,
     record: dict,
     filters: dict,
-    filter_condition: str = "AND",
+    filter_condition: CONDITION = "AND",
 ):
     # columns, values_placeholder, values = prepare(record)
 
@@ -115,17 +119,32 @@ async def update(
     pass
 
 
-async def read(db: asyncpg.Connection, table: str, **records):
+async def read(
+    db: asyncpg.Connection,
+    table: TABLE,
+    filters: dict,
+    condition: CONDITION = "AND",
+    limit=1,
+    last_id=0,
+) -> list[asyncpg.Record]:
+    where_columns, where_placeholder, where_values = prepare(filters)
+    where_clause_literals = [
+        f"{col}={placeholder}"
+        for col, placeholder in zip(where_columns, where_placeholder)
+    ]
+    where_clause_literals.append(f"id > {last_id}")
+    where_clause = f" {condition} ".join(where_clause_literals)
+    sql = f"SELECT * from {table} WHERE {where_clause} ORDER BY id ASC LIMIT {limit}"
+    return await db.fetch(sql, *where_values)
+
+
+async def delete(db: asyncpg.Connection, table: TABLE, **records):
     pass
 
 
-async def delete(db: asyncpg.Connection, table: str, **records):
-    pass
-
-
-def get_placeholder(size: int) -> str:
+def get_placeholder(size: int, start=0) -> str:
     placeholder = []
-    for i in range(size):
+    for i in range(start, size):
         placeholder.append(f"${i+1}")
     return ",".join(placeholder)
 

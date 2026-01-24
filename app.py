@@ -1,12 +1,12 @@
 import io
 from typing import Union, Annotated
-from fastapi import FastAPI, File, UploadFile, Request, Depends
+from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.responses import JSONResponse
 from modules.logger import logger
-from modules.buckets import load_buckets, upload_file, PRIMARY_BUCKET
-from modules.db import DBSession, load_schemas, create, File as FileModel
+from modules.buckets import load_buckets, upload_file, get_url, PRIMARY_BUCKET
+from modules.db import DBSession, load_schemas, create, read, File as FileModel
 from dataclasses import asdict
-from modules.responses import FileResponse
+from modules.responses import FileResponse, FileListResponse
 from contextlib import asynccontextmanager
 
 
@@ -46,15 +46,21 @@ async def upload_file_to_bucket(file: Annotated[UploadFile, File()], db: DBSessi
 
 
 @app.get("/bucket/")
-async def list_files():
-    pass
+async def list_files(db: DBSession, page: int = 1, limit: int = 20):
+    page = max(page, 0)
+    files = await read(db, "files", {}, "AND", limit, page)
+    result = [
+        FileResponse(
+            type=file.get("filetype", ""),
+            url=get_url(file.get("name"), PRIMARY_BUCKET),
+            filename=file.get("name"),
+            id=file.get("id"),
+        )
+        for file in files
+    ]
+    return FileListResponse(files=result, total=len(result))
 
 
 @app.get("/bucket/{id}")
 async def get_file(id: str):
     pass
-
-
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: Union[str, None] = None):
-    return {"item_id": item_id, "q": q}

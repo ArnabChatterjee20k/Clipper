@@ -18,22 +18,32 @@ async def load_buckets():
     await create_bucket(PRIMARY_BUCKET)
 
 
-async def create_bucket(bucket_name: str):
+# not a public bucket
+async def create_bucket(bucketname: str):
     client = get_client()
     try:
         await asyncio.to_thread(
-            lambda a: client.head_bucket(Bucket=bucket_name), bucket_name
+            lambda a: client.head_bucket(Bucket=bucketname), bucketname
         )
         return True
     except botocore.exceptions.ClientError as e:
         error_code = int(e.response["Error"]["Code"])
         if error_code == 404:
-            await asyncio.to_thread(lambda a: client.create_bucket(Bucket=bucket_name))
+            await asyncio.to_thread(lambda a: client.create_bucket(Bucket=bucketname))
             return True
     return False
 
 
-async def upload_file(file: BinaryIO, bucket_name: str = PRIMARY_BUCKET):
+async def upload_file(file: BinaryIO, bucketname: str = PRIMARY_BUCKET):
     client = get_client()
-    await asyncio.to_thread(lambda: client.upload_fileobj(file, bucket_name, file.name))
+    await asyncio.to_thread(lambda: client.upload_fileobj(file, bucketname, file.name))
     return True
+
+
+def get_url(filename: str, bucketname: str):
+    # https://stackoverflow.com/questions/65198959/aws-s3-generate-presigned-url-vs-generate-presigned-post-for-uploading-files
+    # put_object for upload
+    client = get_client()
+    return client.generate_presigned_url(
+        "get_object", Params={"Bucket": bucketname, "Key": filename}, ExpiresIn=7200
+    )
