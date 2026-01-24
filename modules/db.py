@@ -45,8 +45,7 @@ class File:
 class Job:
     id: Optional[int] = field(init=False, default=-1)
     filename: str
-    # typo due to the schema, should be filetype
-    filtype: str
+    filetype: str
     action: dict
     status: str
     created_at: datetime = datetime.now()
@@ -74,6 +73,7 @@ async def load_schemas():
                     id serial PRIMARY KEY,
                     name VARCHAR(50),
                     bucketname VARCHAR(50),
+                    filetype  VARCHAR(20),
                     created_at timestamp
                 )
             """)
@@ -84,7 +84,7 @@ async def load_schemas():
                 CREATE TABLE IF NOT EXISTS jobs(
                     id serial PRIMARY KEY,
                     filename VARCHAR(50) NOT NULL,
-                    filtype  VARCHAR(20),
+                    filetype  VARCHAR(20),
                     bucketname VARCHAR(50),
                     created_at timestamp NOT NULL,
                     updated_at timestamp NOT NULL,
