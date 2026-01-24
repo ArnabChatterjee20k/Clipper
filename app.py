@@ -42,11 +42,17 @@ async def upload_file_to_bucket(file: Annotated[UploadFile, File()], db: DBSessi
         out_file = io.BytesIO(await file.read())
         out_file.name = file.filename
         await upload_file(out_file)
-    return FileResponse(type=file.content_type, filename=file.filename, file_id=file_id)
+    return FileResponse(
+        type=file.content_type,
+        filename=file.filename,
+        id=file_id,
+        url=get_url(file.filename, PRIMARY_BUCKET),
+    )
 
 
 @app.get("/bucket/")
 async def list_files(db: DBSession, page: int = 1, limit: int = 20):
+    # TODO: add filtering for created at and updated at and for filetype
     page = max(page, 0)
     files = await read(db, "files", {}, "AND", limit, page)
     result = [
