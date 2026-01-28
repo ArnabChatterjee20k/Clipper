@@ -8,7 +8,7 @@ from .db import get_db, create, Job, JobStatus
 
 # TODO: Add dead-jobs(cancellation status), heartbeat(progress update for long running jobs to know its running or not), logging worker health -> also need to check whether the worker is still processing or not
 # holding a lock and processing and then unlock is a good idea?
-# TODO: get job status, improve the start-stop logic
+# TODO: add a new processor for check completed jobs and moving the output to different bucket and archive the other results
 class Worker:
     def __init__(self, retries=5, wait_time_seconds=1, id=""):
         self._db = None
@@ -30,15 +30,19 @@ class Worker:
         self._running = True
         logger.info(f"Worker {self._id} started")
         while self._running:
-            job = await self.dequeue()
-            if not job:
+            try:
+                job = await self.dequeue()
+                if not job:
+                    await asyncio.sleep(self._wait)
+                    continue
+                logger.info(f"Worker {self._id} processing: {json.dumps(asdict(job))}")
+                await self.complete(job.id)
+                logger.info(
+                    f"Worker {self._id} finished processing: {json.dumps(asdict(job))}"
+                )
+            except Exception as e:
+                logger.error(f"Error in Worker {self._id}: {str(e)}")
                 await asyncio.sleep(self._wait)
-                continue
-            logger.info(f"Worker {self._id} processing: {json.dumps(asdict(job))}")
-            # process media
-            logger.info(
-                f"Worker {self._id} finished processing: {json.dumps(asdict(job))}"
-            )
 
     async def stop(self):
         self._running = False
@@ -61,7 +65,7 @@ class Worker:
                 WITH current_job AS(
                     SELECT id
                     FROM jobs
-                    WHERE status = '{JobStatus.QUEUED.value}' AND retries <= {self._max_retries}
+                    WHERE status = '{JobStatus.PROCESSING.value}' AND retries <= {self._max_retries}
                     ORDER BY created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -80,8 +84,8 @@ class Worker:
             id=job.get("id"),
             filename=job.get("filename"),
             action=json.loads(job.get("action")),
-            created_at=job.get("created_at"),
-            updated_at=job.get("updated_at"),
+            created_at=str(job.get("created_at")),
+            updated_at=str(job.get("updated_at")),
             filetype=job.get("filetype"),
             retries=job.get("retries"),
             status=job.get("status"),

@@ -3,11 +3,12 @@ services:
     build:
       context: .
     ports:
-      - "8000:8000"
+      - "8002:8000"
     volumes:
       - ./media:/code/media
     depends_on:
       - postgres
+      - minik
 
   postgres:
     image: postgres:18.1-bookworm

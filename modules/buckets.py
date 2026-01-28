@@ -34,16 +34,22 @@ async def create_bucket(bucketname: str):
     return False
 
 
-async def upload_file(file: BinaryIO, bucketname: str = PRIMARY_BUCKET):
+async def upload_file(
+    file: BinaryIO, bucketname: str = PRIMARY_BUCKET, filename: str = None
+):
     client = get_client()
-    await asyncio.to_thread(lambda: client.upload_fileobj(file, bucketname, file.name))
+    await asyncio.to_thread(
+        lambda: client.upload_fileobj(file, bucketname, filename if file else file.name)
+    )
     return True
 
 
-def get_url(filename: str, bucketname: str):
+def get_url(filename: str, bucketname: str, upload=False):
     # https://stackoverflow.com/questions/65198959/aws-s3-generate-presigned-url-vs-generate-presigned-post-for-uploading-files
     # put_object for upload
     client = get_client()
     return client.generate_presigned_url(
-        "get_object", Params={"Bucket": bucketname, "Key": filename}, ExpiresIn=7200
+        "get_object" if not upload else "put_object",
+        Params={"Bucket": bucketname, "Key": filename},
+        ExpiresIn=7200,
     )

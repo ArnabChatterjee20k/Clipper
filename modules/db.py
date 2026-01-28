@@ -48,7 +48,7 @@ class Job:
     filetype: str
     action: dict
     status: str
-    id: Optional[int]
+    id: Optional[int] = None
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
     version: int = 0
