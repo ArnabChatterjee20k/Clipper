@@ -57,7 +57,7 @@ async def list_files(db: DBSession, page: int = 1, limit: int = 20):
     files = await read(db, "files", {}, "AND", limit, page)
     result = [
         FileResponse(
-            type=file.get("filetype", ""),
+            type=file.get("filetype", "") or "",
             url=get_url(file.get("name"), PRIMARY_BUCKET),
             filename=file.get("name"),
             id=file.get("id"),
@@ -67,6 +67,4 @@ async def list_files(db: DBSession, page: int = 1, limit: int = 20):
     return FileListResponse(files=result, total=len(result))
 
 
-@app.get("/bucket/{id}")
-async def get_file(id: str):
-    pass
+# EDIT
