@@ -369,8 +369,6 @@ class VideoProcessor:
 
         cmd = get_cmd(
             [
-                "-i",
-                "-T",
                 "ffmpeg",
                 "-f",
                 "concat",
@@ -397,15 +395,77 @@ class VideoProcessor:
         ):
             yield chunk
 
-    def transcode(self):
-        pass
+    async def transcode(
+        self,
+        input: str,
+        output_codec="mp4",
+        codec: str = "libx264",
+        preset: str = "medium",
+        crf: int = 23,
+        audio_codec: AudioFormat = AudioFormat.AAC,
+    ):
+        cmd = get_cmd(
+            [
+                ffmpeg,
+                "-i",
+                input,
+                "-c:v",
+                codec,
+                "-movflags",
+                "+frag_keyframe+empty_moov",
+                "-f",
+                output_codec,
+            ]
+        )
 
-    def trim(self):
-        pass
+        async for chunk in execute(
+            cmd,
+            input,
+            self.chunk_size,
+            complete_callaback=self.complete_callaback,
+            progress_callback=self.progress_callback,
+        ):
+            yield chunk
+
+    async def trim(
+        self,
+        input: str,
+        output_codec="mp4",
+        start_time: str = "00:00:00",
+        end_time: str = None,
+        duration: int = None,
+    ):
+        cmd = ["ffmpeg", "-i", input, "-ss", start_time]
+        if end_time:
+            cmd.extend(["-to", end_time])
+        elif duration:
+            cmd.extend(["-t", str(duration)])
+
+        cmd.extend(
+            [
+                "-c",
+                "copy",
+                "-movflags",
+                "+frag_keyframe+empty_moov",
+                "-f",
+                output_codec,
+            ]
+        )
+
+        cmd = get_cmd(cmd)
+
+        async for chunk in execute(
+            cmd,
+            input,
+            self.chunk_size,
+            complete_callaback=self.complete_callaback,
+            progress_callback=self.progress_callback,
+        ):
+            yield chunk
 
     def add_audio(self):
         pass
-    
+
     # kind of instagram -> all text to different frames in a single command
     def add_text(self):
         pass
