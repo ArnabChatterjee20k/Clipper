@@ -1,3 +1,4 @@
+# For easy reference and getting the processor idea check the scripts/ffmpeg.py file
 import json, subprocess, re
 import asyncio
 from datetime import datetime
@@ -11,10 +12,43 @@ from io import BytesIO
 ffprobe = "ffprobe"
 ffmpeg = "ffmpeg"
 
+# Timeout for ffprobe (seconds); prevents hang on bad/remote input
+FFPROBE_TIMEOUT = 60
+
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(v: Any, default: int = 0) -> int:
+    if v is None:
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_fps(r_frame_rate: str) -> float:
+    """Parse ffprobe r_frame_rate (e.g. '30/1') without eval()."""
+    if not r_frame_rate or "/" not in r_frame_rate:
+        return 0.0
+    parts = r_frame_rate.split("/", 1)
+    try:
+        num, den = int(parts[0].strip()), int(parts[1].strip())
+        return num / den if den else 0.0
+    except (ValueError, IndexError, ZeroDivisionError):
+        return 0.0
+
 
 @dataclass
 class ExecutionResult:
-    processing_time: int
+    processing_time: float
     start_time: str
     end_time: str
     error: Optional[str] = None
@@ -28,16 +62,15 @@ class VideoInfo:
     width: Optional[int] = None
     height: Optional[int] = None
     codec: Optional[str] = None
-    fps: Optional[str] = None
+    fps: Optional[float] = None
+    has_audio: bool = False
     error: Optional[str] = None
-
-
-# --- Segment types for add_text / speed_control: end_sec = -1 means "till the end" ---
 
 
 @dataclass
 class TextSegment:
     """Text overlay for a time range. end_sec=-1 means till the end of the video."""
+
     start_sec: float
     end_sec: float  # -1 = till end
     text: str
@@ -55,6 +88,7 @@ class TextSegment:
 @dataclass
 class SpeedSegment:
     """Speed override for a time range. end_sec=-1 means till the end of the video."""
+
     start_sec: float = 0
     end_sec: float = -1
     speed: float = 1.0
@@ -105,6 +139,7 @@ class WatermarkPosition(str, Enum):
 
 class VideoFormat(str, Enum):
     """Output container/codec for video export (-f)."""
+
     MP4 = "mp4"
     MATROSKA = "matroska"
     WEBM = "webm"
@@ -112,6 +147,7 @@ class VideoFormat(str, Enum):
 
 class AudioFormat(str, Enum):
     """Output format for audio extraction (codec + -f)."""
+
     MP3 = "libmp3lame"
     AAC = "aac"
     WAV = "pcm_s16le"
@@ -121,6 +157,7 @@ class AudioFormat(str, Enum):
 @dataclass
 class WatermarkOverlay:
     """Watermark image overlay on video."""
+
     path: str
     position: WatermarkPosition = WatermarkPosition.SAFE_BOTTOM
     opacity: float = 0.7
@@ -129,6 +166,7 @@ class WatermarkOverlay:
 @dataclass
 class AudioOverlay:
     """Background or mix-in audio (e.g. music)."""
+
     path: str
     mix_volume: float = 1.0  # 0–1 relative to main audio
     loop: bool = False
@@ -137,6 +175,7 @@ class AudioOverlay:
 @dataclass
 class BackgroundColor:
     """Solid background color. only_color=True means output is just the color (no source video)."""
+
     color: str = "black"  # FFmpeg color name or 0xRRGGBB
     only_color: bool = False  # if True, output is solid color only (no video)
 
@@ -144,14 +183,19 @@ class BackgroundColor:
 @dataclass
 class TranscodeOptions:
     """Encoding options for transcode/compress. Matches common ffmpeg transcode API."""
+
     codec: str = "libx264"  # video codec (alias video_codec)
     preset: str = "medium"
     crf: int = 23
     audio_codec: str = "aac"
     audio_bitrate: Optional[str] = None  # e.g. "128k"
-    movflags: Optional[str] = None  # None = use pipe-friendly; "+faststart" for file output
+    movflags: Optional[str] = (
+        None  # None = use pipe-friendly; "+faststart" for file output
+    )
     # compress-style: optional target size and scale
-    target_size_mb: Optional[float] = None  # target file size in MB -> computes -b:v, -maxrate, -bufsize
+    target_size_mb: Optional[float] = (
+        None  # target file size in MB -> computes -b:v, -maxrate, -bufsize
+    )
     scale: Optional[str] = None  # e.g. "1280:-1" -> -vf scale=...
 
 
@@ -178,21 +222,32 @@ def get_cmd(input: list[str]):
     ]
 
 
+def _build_concat_manifest(paths: list[str]) -> str:
+    """Build FFmpeg concat demuxer manifest. Escapes single quotes in paths."""
+    lines = []
+    for p in paths:
+        escaped = (p or "").replace("'", "'\\''")
+        lines.append(f"file '{escaped}'")
+    return "\n".join(lines) + "\n"
+
+
 # make sure to pass -f in the command to determine the output type as we are not passing output externally
 # so -f determines the output container
 async def execute(
     cmd: list[str],
     input: str,
     chunk_size: int = 8192,
-    complete_callaback: Optional[OnCompleteCallback] = None,
+    complete_callback: Optional[OnCompleteCallback] = None,
     progress_callback: Optional[ProgressCallaback] = None,
-    stdin: str = None,
+    stdin: Optional[Union[str, bytes]] = None,
+    total_duration: Optional[float] = None,
 ):
     start_time = datetime.now()
-    video_info: VideoInfo = await asyncio.to_thread(
-        lambda: VideoBuilder.get_video_info(input)
-    )
-    total_duration = video_info.duration
+    if total_duration is None:
+        video_info: VideoInfo = await asyncio.to_thread(
+            lambda: VideoBuilder.get_video_info(input)
+        )
+        total_duration = video_info.duration
 
     cmd = [
         *cmd,
@@ -206,20 +261,21 @@ async def execute(
         *cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        stdin=asyncio.subprocess.PIPE if stdin else None,
+        stdin=asyncio.subprocess.PIPE if stdin is not None else None,
     )
 
-    # Write stdin in background if provided
+    # Write stdin in background if provided (subprocess expects bytes)
     async def write_stdin():
         if stdin is not None:
-            process.stdin.write(stdin)
+            data = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
+            process.stdin.write(data)
             await process.stdin.drain()
             process.stdin.close()
             await process.stdin.wait_closed()
 
     stdin_task = asyncio.create_task(write_stdin())
 
-    std_error = []
+    std_error: list[str] = []
 
     async def read_stderr():
         while True:
@@ -228,7 +284,7 @@ async def execute(
                 break
             line = line.decode(errors="replace").rstrip()
             std_error.append(line)
-            if progress_callback:
+            if progress_callback and total_duration is not None and total_duration > 0:
                 get_progress(total_duration, line, progress_callback)
 
     std_error_task = asyncio.create_task(read_stderr())
@@ -244,9 +300,9 @@ async def execute(
 
         end_time = datetime.now()
 
-        error = None
+        error: Optional[str] = None
         if process.returncode != 0:
-            error = std_error[-100:]
+            error = "\n".join(std_error[-100:])
         result = ExecutionResult(
             start_time=start_time,
             end_time=end_time,
@@ -254,20 +310,32 @@ async def execute(
             error=error,
         )
 
-        if complete_callaback:
-            complete_callaback(result)
+        if complete_callback:
+            complete_callback(result)
 
 
-
-def _drawtext_enable(start_sec: float, end_sec: float, duration: float) -> str:
-    """FFmpeg enable expression for drawtext. end_sec=-1 means till end."""
-    end = duration if end_sec < 0 else end_sec
-    return f"between(t,{start_sec},{end})"
+def _drawtext_enable(start_sec: float, end_sec: float) -> str:
+    """FFmpeg enable expression for drawtext (times in output timeline)."""
+    return f"between(t,{start_sec},{end_sec})"
 
 
-def _drawtext_opts(seg: TextSegment, duration: float) -> str:
-    """Build drawtext filter options for one TextSegment."""
-    enable = _drawtext_enable(seg.start_sec, seg.end_sec, duration)
+def _drawtext_opts(
+    seg: TextSegment,
+    duration: float,
+    trim_start: Optional[float] = None,
+    effective_duration: Optional[float] = None,
+) -> str:
+    """Build drawtext filter options for one TextSegment.
+    When trim_start and effective_duration are set, segment times are converted to output timeline.
+    """
+    if trim_start is not None and effective_duration is not None:
+        start_out = max(0.0, seg.start_sec - trim_start)
+        end_resolved = _resolve_end_sec(seg.end_sec, duration)
+        end_out = min(effective_duration, end_resolved - trim_start)
+    else:
+        start_out = seg.start_sec
+        end_out = _resolve_end_sec(seg.end_sec, duration)
+    enable = _drawtext_enable(start_out, end_out)
     text_esc = (seg.text or "").replace("'", "''")
     opts = [
         f"enable='{enable}'",
@@ -327,30 +395,47 @@ class VideoBuilder:
         cmd = get_cmd(
             [
                 ffprobe,
-                "-v", "quiet",
-                "-print_format", "json",
-                "-show_format", "-show_streams",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
                 input_path,
             ]
         )
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=FFPROBE_TIMEOUT,
+            )
             output = json.loads(result.stdout)
             streams = output.get("streams", [])
             video_stream = next(
-                (s for s in streams if s["codec_type"] == "video"), None
+                (s for s in streams if s.get("codec_type") == "video"), None
             )
             if not video_stream:
                 return VideoInfo(error="Not a video stream")
+            fmt = output.get("format") or {}
+            duration = _safe_float(fmt.get("duration"), 0.0)
+            if duration <= 0:
+                return VideoInfo(error="Invalid or zero duration")
+            has_audio = any(s.get("codec_type") == "audio" for s in streams)
             return VideoInfo(
-                duration=float(output["format"].get("duration", 0)),
-                size=int(output["format"].get("size", 0)),
-                bitrate=int(output["format"].get("bit_rate", 0)),
+                duration=duration,
+                size=_safe_int(fmt.get("size"), 0),
+                bitrate=_safe_int(fmt.get("bit_rate"), 0),
                 width=video_stream.get("width"),
                 height=video_stream.get("height"),
                 codec=video_stream.get("codec_name"),
-                fps=eval(video_stream.get("r_frame_rate", "0/1")),
+                fps=_parse_fps(video_stream.get("r_frame_rate", "0/1")),
+                has_audio=has_audio,
             )
+        except subprocess.TimeoutExpired as e:
+            return VideoInfo(error=f"ffprobe timeout: {e}")
         except Exception as e:
             return VideoInfo(error=str(e))
 
@@ -486,7 +571,11 @@ class VideoBuilder:
             trim_end = self._trim_end
         if self._trim_duration is not None and self._trim_start is not None:
             trim_end = self._trim_start + self._trim_duration
-        effective_duration = (trim_end - (self._trim_start or 0)) if self._trim_start is not None else duration
+        effective_duration = (
+            (trim_end - (self._trim_start or 0))
+            if self._trim_start is not None
+            else duration
+        )
 
         parts: list[str] = []
 
@@ -500,7 +589,10 @@ class VideoBuilder:
             video_in = "[bg]"
             audio_in = "[a_trim]"
         else:
-            if self._background_color is not None and not self._background_color.only_color:
+            if (
+                self._background_color is not None
+                and not self._background_color.only_color
+            ):
                 parts.append(
                     f"color=c={self._background_color.color}:s={w}x{h}:d={effective_duration}:r=30[bg];"
                 )
@@ -520,7 +612,9 @@ class VideoBuilder:
             if self._trim_start is not None:
                 start = max(0, s.start_sec - self._trim_start)
                 end = min(trim_end - self._trim_start, end - self._trim_start)
-            speed_segments.append(SpeedSegment(start_sec=start, end_sec=end, speed=s.speed))
+            speed_segments.append(
+                SpeedSegment(start_sec=start, end_sec=end, speed=s.speed)
+            )
 
         if speed_segments:
             if len(speed_segments) == 1 and speed_segments[0].speed != 1.0:
@@ -554,8 +648,9 @@ class VideoBuilder:
 
         if self._text_segments:
             # Chain multiple drawtext filters with comma; colons only separate options within one filter
+            # Pass trim_start and effective_duration so segment times are in output timeline
             drawtext_filters = [
-                f"drawtext={_drawtext_opts(seg, duration)}"
+                f"drawtext={_drawtext_opts(seg, duration, self._trim_start, effective_duration)}"
                 for seg in self._text_segments
             ]
             text_chain = ",".join(drawtext_filters)
@@ -574,8 +669,10 @@ class VideoBuilder:
 
         if self._background_audio is not None:
             extra_inputs.append(self._background_audio.path)
+            # Background audio input index: 1 if no watermark, 2 if watermark present
+            audio_overlay_index = 1 + (1 if self._watermark is not None else 0)
             parts.append(
-                f"{audio_in}[2:a]amix=inputs=2:duration=first:weights='1 {self._background_audio.mix_volume}'[a_mix]"
+                f"{audio_in}[{audio_overlay_index}:a]amix=inputs=2:duration=first:weights='1 {self._background_audio.mix_volume}'[a_mix]"
             )
             audio_in = "[a_mix]"
 
@@ -611,16 +708,25 @@ class VideoBuilder:
         if self._trim_duration is not None and self._trim_start is not None:
             trim_end = self._trim_start + self._trim_duration
         start_sec = self._trim_start or 0
-        duration_sec = trim_end - start_sec if self._trim_start is not None else total_duration
+        duration_sec = (
+            trim_end - start_sec if self._trim_start is not None else total_duration
+        )
         if self._trim_start is None:
             duration_sec = total_duration
 
         # No trim and no speed: simple -vn -c:a -b:a -f
         if self._trim_start is None and not self._speed_segments:
             return [
-                ffmpeg, "-i", self.input_path,
-                "-vn", "-c:a", codec,
-                "-b:a", self._audio_bitrate, "-f", out_format,
+                ffmpeg,
+                "-i",
+                self.input_path,
+                "-vn",
+                "-c:a",
+                codec,
+                "-b:a",
+                self._audio_bitrate,
+                "-f",
+                out_format,
             ]
         # Trim only (no speed): -ss -t -vn -c:a -b:a -f
         if not self._speed_segments:
@@ -663,12 +769,19 @@ class VideoBuilder:
             parts.append(f"{audio_in}anull[a_out]")
         filter_complex = ";".join(parts)
         return [
-            ffmpeg, "-i", self.input_path,
-            "-filter_complex", filter_complex,
-            "-map", "[a_out]",
-            "-c:a", codec,
-            "-b:a", self._audio_bitrate,
-            "-f", out_format,
+            ffmpeg,
+            "-i",
+            self.input_path,
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[a_out]",
+            "-c:a",
+            codec,
+            "-b:a",
+            self._audio_bitrate,
+            "-f",
+            out_format,
         ]
 
     def _build(self, info: VideoInfo, action: str = "export") -> list[str]:
@@ -690,10 +803,14 @@ class VideoBuilder:
         if not has_filters:
             return [
                 ffmpeg,
-                "-i", self.input_path,
-                "-c", "copy",
-                "-f", self._video_format.value,
-                "-movflags", "+frag_keyframe+empty_moov",
+                "-i",
+                self.input_path,
+                "-c",
+                "copy",
+                "-f",
+                self._video_format.value,
+                "-movflags",
+                "+frag_keyframe+empty_moov",
             ]
         extra_inputs, filter_complex = self._build_filter_complex(
             info.duration, info.width, info.height, opts.scale
@@ -702,25 +819,39 @@ class VideoBuilder:
         movflags = opts.movflags or "+frag_keyframe+empty_moov"
         cmd_parts = [
             ffmpeg,
-            "-i", self.input_path,
+            "-i",
+            self.input_path,
             *[x for i in extra_inputs for x in ("-i", i)],
-            "-filter_complex", filter_complex,
-            "-map", "[v_out]",
-            "-map", "[a_out]",
-            "-c:v", opts.codec,
-            "-preset", opts.preset,
-            "-c:a", opts.audio_codec,
-            "-f", self._video_format.value,
-            "-movflags", movflags,
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[v_out]",
+            "-map",
+            "[a_out]",
+            "-c:v",
+            opts.codec,
+            "-preset",
+            opts.preset,
+            "-c:a",
+            opts.audio_codec,
+            "-f",
+            self._video_format.value,
+            "-movflags",
+            movflags,
         ]
         if opts.target_size_mb is not None and opts.target_size_mb > 0:
             target_bitrate = int((opts.target_size_mb * 8192) / duration_sec) - 128
             target_bitrate = max(100, target_bitrate)
-            cmd_parts.extend([
-                "-b:v", f"{target_bitrate}k",
-                "-maxrate", f"{int(target_bitrate * 1.5)}k",
-                "-bufsize", f"{target_bitrate * 2}k",
-            ])
+            cmd_parts.extend(
+                [
+                    "-b:v",
+                    f"{target_bitrate}k",
+                    "-maxrate",
+                    f"{int(target_bitrate * 1.5)}k",
+                    "-bufsize",
+                    f"{target_bitrate * 2}k",
+                ]
+            )
         else:
             cmd_parts.extend(["-crf", str(opts.crf)])
         if opts.audio_bitrate:
@@ -734,12 +865,14 @@ class VideoBuilder:
         )
         if info.error or info.duration is None:
             raise RuntimeError(f"Invalid input or no duration: {info.error}")
+        if not info.has_audio:
+            raise RuntimeError("Input has no audio stream; export requires audio")
         cmd = get_cmd(self._build(info))
         async for chunk in execute(
             cmd,
             self.input_path,
             self._chunk_size,
-            complete_callaback=self.complete_callback,
+            complete_callback=self.complete_callback,
             progress_callback=self.progress_callback,
         ):
             yield chunk
@@ -758,12 +891,14 @@ class VideoBuilder:
         )
         if info.error or info.duration is None:
             raise RuntimeError(f"Invalid input or no duration: {info.error}")
+        if not info.has_audio:
+            raise RuntimeError("Input has no audio stream; cannot extract audio")
         cmd = get_cmd(self._build(info, "extract_audio"))
         async for chunk in execute(
             cmd,
             self.input_path,
             self._chunk_size,
-            complete_callaback=self.complete_callback,
+            complete_callback=self.complete_callback,
             progress_callback=self.progress_callback,
         ):
             yield chunk
@@ -772,5 +907,75 @@ class VideoBuilder:
         """Extract audio and return the full output as bytes (uses builder trim/speed and constructor audio format)."""
         result = bytearray()
         async for chunk in self.extract_audio():
+            result.extend(chunk)
+        return bytes(result)
+
+    @staticmethod
+    async def concat_videos(
+        input_paths: list[str],
+        video_format: VideoFormat = VideoFormat.MP4,
+        chunk_size: int = 8192,
+        complete_callback: Optional[OnCompleteCallback] = None,
+        progress_callback: Optional[ProgressCallaback] = None,
+    ) -> AsyncGenerator[bytes, None, None]:
+        """Concatenate multiple videos (concat demuxer). Streams output to stdout.
+        Requires at least 2 input paths. Uses -c copy; all inputs should have compatible codecs.
+        """
+        if len(input_paths) < 2:
+            raise ValueError("concat_videos requires at least 2 input paths")
+        manifest = _build_concat_manifest(input_paths)
+        total_duration = 0.0
+        for path in input_paths:
+            info = await asyncio.to_thread(
+                lambda p=path: VideoBuilder.get_video_info(p)
+            )
+            if info.error or info.duration is None:
+                raise RuntimeError(
+                    f"Invalid input {path!r}: {info.error or 'no duration'}"
+                )
+            total_duration += info.duration or 0.0
+        cmd = get_cmd(
+            [
+                ffmpeg,
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                "pipe:0",
+                "-c",
+                "copy",
+                "-f",
+                video_format.value,
+                "-movflags",
+                "+frag_keyframe+empty_moov",
+            ]
+        )
+        async for chunk in execute(
+            cmd,
+            input_paths[0],
+            chunk_size=chunk_size,
+            complete_callback=complete_callback,
+            progress_callback=progress_callback,
+            stdin=manifest,
+            total_duration=total_duration,
+        ):
+            yield chunk
+
+    @staticmethod
+    async def concat_videos_to_bytes(
+        input_paths: list[str],
+        video_format: VideoFormat = VideoFormat.MP4,
+        complete_callback: Optional[OnCompleteCallback] = None,
+        progress_callback: Optional[ProgressCallaback] = None,
+    ) -> bytes:
+        """Concatenate multiple videos and return the full output as bytes."""
+        result = bytearray()
+        async for chunk in VideoBuilder.concat_videos(
+            input_paths,
+            video_format=video_format,
+            complete_callback=complete_callback,
+            progress_callback=progress_callback,
+        ):
             result.extend(chunk)
         return bytes(result)

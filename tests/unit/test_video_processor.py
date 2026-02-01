@@ -1,5 +1,7 @@
 """Unit tests for VideoBuilder: assert the output ffmpeg commands from _build()."""
 
+import asyncio
+
 import pytest
 
 from modules.video_processor import (
@@ -15,9 +17,9 @@ from modules.video_processor import (
     BackgroundColor,
     TranscodeOptions,
     _atempo_chain,
+    _build_concat_manifest,
     _resolve_end_sec,
 )
-
 
 # --- Fixtures and helpers ---
 
@@ -102,11 +104,14 @@ class TestExportNoFilters:
         assert cmd_get(cmd, "-f") == "mp4"
         assert "-filter_complex" not in cmd
 
-    @pytest.mark.parametrize("video_format,expected_f", [
-        (VideoFormat.MP4, "mp4"),
-        (VideoFormat.MATROSKA, "matroska"),
-        (VideoFormat.WEBM, "webm"),
-    ])
+    @pytest.mark.parametrize(
+        "video_format,expected_f",
+        [
+            (VideoFormat.MP4, "mp4"),
+            (VideoFormat.MATROSKA, "matroska"),
+            (VideoFormat.WEBM, "webm"),
+        ],
+    )
     def test_video_format_reflected_in_f(self, default_info, video_format, expected_f):
         b = VideoBuilder("in.mov", video_format=video_format)
         cmd = b._build(default_info)
@@ -157,10 +162,12 @@ class TestExportText:
         assert "fontsize=24" in fc
 
     def test_multiple_text_segments_comma_chain(self, default_info):
-        b = VideoBuilder("input.mp4").add_text([
-            TextSegment(0, 10, "First"),
-            TextSegment(5, 15, "Second"),
-        ])
+        b = VideoBuilder("input.mp4").add_text(
+            [
+                TextSegment(0, 10, "First"),
+                TextSegment(5, 15, "Second"),
+            ]
+        )
         cmd = b._build(default_info)
         fc = filter_complex(cmd)
         assert fc is not None
@@ -169,7 +176,15 @@ class TestExportText:
 
     def test_text_with_styling_fontcolor_box(self, default_info):
         b = VideoBuilder("input.mp4").add_text(
-            TextSegment(0, -1, "Title", fontcolor="white", background=True, boxcolor="black@0.6", boxborderw=10)
+            TextSegment(
+                0,
+                -1,
+                "Title",
+                fontcolor="white",
+                background=True,
+                boxcolor="black@0.6",
+                boxborderw=10,
+            )
         )
         cmd = b._build(default_info)
         fc = filter_complex(cmd)
@@ -210,10 +225,12 @@ class TestExportSpeed:
         assert "setpts=PTS/1.0" not in fc or "atempo=1.0" not in fc
 
     def test_multiple_speed_segments_concat(self, default_info):
-        b = VideoBuilder("input.mp4").speed_control([
-            SpeedSegment(0, 10, 1.0),
-            SpeedSegment(10, 20, 2.0),
-        ])
+        b = VideoBuilder("input.mp4").speed_control(
+            [
+                SpeedSegment(0, 10, 1.0),
+                SpeedSegment(10, 20, 2.0),
+            ]
+        )
         cmd = b._build(default_info)
         fc = filter_complex(cmd)
         assert fc is not None
@@ -235,7 +252,9 @@ class TestExportSpeed:
 class TestExportWatermark:
     def test_watermark_extra_input_and_overlay(self, default_info):
         b = VideoBuilder("input.mp4").add_watermark(
-            WatermarkOverlay(path="logo.png", position=WatermarkPosition.SAFE_BOTTOM, opacity=0.7)
+            WatermarkOverlay(
+                path="logo.png", position=WatermarkPosition.SAFE_BOTTOM, opacity=0.7
+            )
         )
         cmd = b._build(default_info)
         assert cmd.count("-i") >= 2
@@ -247,7 +266,9 @@ class TestExportWatermark:
 
     def test_watermark_position_reflected(self, default_info):
         b = VideoBuilder("input.mp4").add_watermark(
-            WatermarkOverlay(path="logo.png", position=WatermarkPosition.CENTER, opacity=0.5)
+            WatermarkOverlay(
+                path="logo.png", position=WatermarkPosition.CENTER, opacity=0.5
+            )
         )
         cmd = b._build(default_info)
         fc = filter_complex(cmd)
@@ -260,7 +281,9 @@ class TestExportWatermark:
 
 class TestExportBackgroundAudio:
     def test_background_audio_amix(self, default_info):
-        b = VideoBuilder("input.mp4").add_background_audio(path="music.mp3", mix_volume=0.3)
+        b = VideoBuilder("input.mp4").add_background_audio(
+            path="music.mp3", mix_volume=0.3
+        )
         cmd = b._build(default_info)
         assert cmd.count("-i") >= 2
         assert "music.mp3" in cmd
@@ -285,8 +308,10 @@ class TestExportBackgroundColor:
         assert "s=1920x1080" in fc
 
     def test_video_on_color_background(self, default_info):
-        b = VideoBuilder("input.mp4").trim(0, 5).set_background_color(
-            BackgroundColor(color="0x333333", only_color=False)
+        b = (
+            VideoBuilder("input.mp4")
+            .trim(0, 5)
+            .set_background_color(BackgroundColor(color="0x333333", only_color=False))
         )
         cmd = b._build(default_info)
         fc = filter_complex(cmd)
@@ -300,8 +325,10 @@ class TestExportBackgroundColor:
 
 class TestExportTranscode:
     def test_transcode_kwargs(self, default_info):
-        b = VideoBuilder("input.mp4").trim(start_sec=0, end_sec=5).transcode(
-            codec="libx264", preset="fast", crf=26, audio_codec="aac"
+        b = (
+            VideoBuilder("input.mp4")
+            .trim(start_sec=0, end_sec=5)
+            .transcode(codec="libx264", preset="fast", crf=26, audio_codec="aac")
         )
         cmd = b._build(default_info)
         assert cmd_get(cmd, "-c:v") == "libx264"
@@ -310,8 +337,14 @@ class TestExportTranscode:
         assert cmd_get(cmd, "-c:a") == "aac"
 
     def test_transcode_options_object(self, default_info):
-        b = VideoBuilder("input.mp4").trim(0, 5).transcode(
-            options=TranscodeOptions(codec="libx264", preset="slow", crf=18, audio_bitrate="192k")
+        b = (
+            VideoBuilder("input.mp4")
+            .trim(0, 5)
+            .transcode(
+                options=TranscodeOptions(
+                    codec="libx264", preset="slow", crf=18, audio_bitrate="192k"
+                )
+            )
         )
         cmd = b._build(default_info)
         assert cmd_get(cmd, "-preset") == "slow"
@@ -379,12 +412,17 @@ class TestExtractAudio:
         assert cmd_get(cmd, "-b:a") == "192k"
         assert "-filter_complex" not in cmd
 
-    @pytest.mark.parametrize("audio_format,expected_codec,expected_f", [
-        (AudioFormat.AAC, "aac", "ipod"),
-        (AudioFormat.WAV, "pcm_s16le", "wav"),
-        (AudioFormat.FLAC, "flac", "flac"),
-    ])
-    def test_constructor_audio_format(self, default_info, audio_format, expected_codec, expected_f):
+    @pytest.mark.parametrize(
+        "audio_format,expected_codec,expected_f",
+        [
+            (AudioFormat.AAC, "aac", "ipod"),
+            (AudioFormat.WAV, "pcm_s16le", "wav"),
+            (AudioFormat.FLAC, "flac", "flac"),
+        ],
+    )
+    def test_constructor_audio_format(
+        self, default_info, audio_format, expected_codec, expected_f
+    ):
         b = VideoBuilder("input.mp4", audio_format=audio_format)
         cmd = b._build(default_info, "extract_audio")
         assert cmd_get(cmd, "-c:a") == expected_codec
@@ -424,10 +462,12 @@ class TestExtractAudio:
         assert "[a_out]" in cmd
 
     def test_extract_audio_multiple_speed_segments(self, default_info):
-        b = VideoBuilder("input.mp4").speed_control([
-            SpeedSegment(0, 10, 1.0),
-            SpeedSegment(10, 20, 1.5),
-        ])
+        b = VideoBuilder("input.mp4").speed_control(
+            [
+                SpeedSegment(0, 10, 1.0),
+                SpeedSegment(10, 20, 1.5),
+            ]
+        )
         cmd = b._build(default_info, "extract_audio")
         fc = filter_complex(cmd)
         assert fc is not None
@@ -462,3 +502,35 @@ class TestBuilderChaining:
     def test_compress_returns_self(self):
         b = VideoBuilder("x.mp4")
         assert b.compress(scale="640:-1") is b
+
+
+# --- Concat ---
+
+
+class TestConcatManifest:
+    def test_manifest_two_paths(self):
+        manifest = _build_concat_manifest(["a.mp4", "b.mp4"])
+        lines = manifest.strip().split("\n")
+        assert len(lines) == 2
+        assert lines[0] == "file 'a.mp4'"
+        assert lines[1] == "file 'b.mp4'"
+        assert manifest.endswith("\n")
+
+    def test_manifest_escapes_single_quotes(self):
+        manifest = _build_concat_manifest(["path/with'quote.mp4"])
+        assert "file '" in manifest
+        assert "''" in manifest or "'\\''" in manifest
+
+
+class TestConcatVideos:
+    def test_requires_at_least_two_paths_empty(self):
+        with pytest.raises(ValueError, match="at least 2"):
+            asyncio.run(VideoBuilder.concat_videos([]).__anext__())
+
+    def test_requires_at_least_two_paths_one(self):
+        async def run():
+            async for _ in VideoBuilder.concat_videos(["only.mp4"]):
+                pass
+
+        with pytest.raises(ValueError, match="at least 2"):
+            asyncio.run(run())
