@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Optional, Protocol, AsyncGenerator, Any, Union
 from dataclasses import dataclass
+from pydantic import BaseModel
 from .logger import logger
 from datetime import datetime
 from enum import Enum
@@ -67,8 +68,7 @@ class VideoInfo:
     error: Optional[str] = None
 
 
-@dataclass
-class TextSegment:
+class TextSegment(BaseModel):
     """Text overlay for a time range. end_sec=-1 means till the end of the video."""
 
     start_sec: float
@@ -85,8 +85,7 @@ class TextSegment:
     background: Optional[bool] = None
 
 
-@dataclass
-class SpeedSegment:
+class SpeedSegment(BaseModel):
     """Speed override for a time range. end_sec=-1 means till the end of the video."""
 
     start_sec: float = 0
@@ -154,8 +153,7 @@ class AudioFormat(str, Enum):
     FLAC = "flac"
 
 
-@dataclass
-class WatermarkOverlay:
+class WatermarkOverlay(BaseModel):
     """Watermark image overlay on video."""
 
     path: str
@@ -163,8 +161,7 @@ class WatermarkOverlay:
     opacity: float = 0.7
 
 
-@dataclass
-class AudioOverlay:
+class AudioOverlay(BaseModel):
     """Background or mix-in audio (e.g. music)."""
 
     path: str
@@ -172,16 +169,14 @@ class AudioOverlay:
     loop: bool = False
 
 
-@dataclass
-class BackgroundColor:
+class BackgroundColor(BaseModel):
     """Solid background color. only_color=True means output is just the color (no source video)."""
 
     color: str = "black"  # FFmpeg color name or 0xRRGGBB
     only_color: bool = False  # if True, output is solid color only (no video)
 
 
-@dataclass
-class TranscodeOptions:
+class TranscodeOptions(BaseModel):
     """Encoding options for transcode/compress. Matches common ffmpeg transcode API."""
 
     codec: str = "libx264"  # video codec (alias video_codec)
@@ -979,3 +974,33 @@ class VideoBuilder:
         ):
             result.extend(chunk)
         return bytes(result)
+
+    def load(self, op: str, **kwargs):
+        """To create builder operations from json"""
+        # service -> builder method
+        schema = {
+            "trim": "trim",
+            "watermark": "add_watermark",
+            "text": "add_text",
+            "speed": "speed_control",
+            # we should be able to control audio as well along adding
+            "audio": "add_background_audio",
+            "backgroundColor": "set_background_color",
+            "transcode": "transcode",
+            "compress": "compress",
+            "concat": "concat_videos",
+            "extractAudio": "extract_audio",
+        }
+
+        if op not in schema:
+            raise ValueError(f"{op} is an unknown operation")
+
+        method_name = schema[op]
+
+        if not hasattr(self, method_name):
+            raise ValueError(f"No processor method found for {op} operation")
+
+        method = getattr(self, method_name)
+        builder = method(**kwargs)
+
+        return builder

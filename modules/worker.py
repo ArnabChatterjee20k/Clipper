@@ -1,9 +1,8 @@
 import asyncio
-import asyncpg, json
-from dataclasses import asdict
+import asyncpg
 from .logger import logger
-from dataclasses import asdict
 from .db import get_db, create, Job, JobStatus
+from .video_processor import VideoBuilder
 
 
 # TODO: Add dead-jobs(cancellation status), heartbeat(progress update for long running jobs to know its running or not), logging worker health -> also need to check whether the worker is still processing or not
@@ -35,10 +34,10 @@ class Worker:
                 if not job:
                     await asyncio.sleep(self._wait)
                     continue
-                logger.info(f"Worker {self._id} processing: {json.dumps(asdict(job))}")
+                logger.info(f"Worker {self._id} processing: {job.model_dump_json()}")
                 await self.complete(job.id)
                 logger.info(
-                    f"Worker {self._id} finished processing: {json.dumps(asdict(job))}"
+                    f"Worker {self._id} finished processing: {job.model_dump_json()}"
                 )
             except Exception as e:
                 logger.error(f"Error in Worker {self._id}: {str(e)}")
@@ -59,13 +58,20 @@ class Worker:
     async def dequeue(self) -> Job:
         # using a CTE to select and update in a single query -> Atomic update(select+update) -> no need of explicit transaction
         # TODO: study why it is good for concurrency and why FOR UPDATE works better with CTE and not with subqueries
+        # also making sure to have a DAG pattern as well so that deque. Ex -> dont deque 1 if 0 doesn't exists
         # TODO: look at the performance
         # TODO: need to think about the retrial here -> one worker would get busy or shall skip and let the other does the thing?
         sql = f"""
                 WITH current_job AS(
-                    SELECT id
-                    FROM jobs
+                    SELECT j.id
+                    FROM jobs j
                     WHERE status = '{JobStatus.PROCESSING.value}' AND retries <= {self._max_retries}
+                    AND NOT EXISTS(
+                        SELECT 1 FROM jobs prev
+                        WHERE prev.uid = j.uid
+                        AND prev.output_version = j.output_version - 1
+                        AND prev.status <> '{JobStatus.COMPLETED.value}'
+                    )
                     ORDER BY created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
@@ -82,14 +88,14 @@ class Worker:
         job = jobs[0]
         return Job(
             id=job.get("id"),
-            filename=job.get("filename"),
-            action=json.loads(job.get("action")),
+            uid=str(job.get("uid")),
+            input=job.get("input"),
+            action=job.get("action"),
             created_at=str(job.get("created_at")),
             updated_at=str(job.get("updated_at")),
-            filetype=job.get("filetype"),
             retries=job.get("retries"),
             status=job.get("status"),
-            version=job.get("version"),
+            output_version=job.get("output_version"),
         )
 
     async def cancel(self, job_id: int) -> Job:
@@ -113,14 +119,14 @@ class Worker:
         job = jobs[0]
         return Job(
             id=job.get("id"),
-            filename=job.get("filename"),
-            action=json.loads(job.get("action")),
-            created_at=job.get("created_at"),
-            updated_at=job.get("updated_at"),
-            filetype=job.get("filetype"),
+            uid=str(job.get("uid")),
+            input=job.get("input"),
+            action=job.get("action"),
+            created_at=str(job.get("created_at")),
+            updated_at=str(job.get("updated_at")),
             retries=job.get("retries"),
             status=job.get("status"),
-            version=job.get("version"),
+            output_version=job.get("output_version"),
         )
 
     async def complete(self, job_id: int):
@@ -143,20 +149,20 @@ class Worker:
         job = jobs[0]
         return Job(
             id=job.get("id"),
-            filename=job.get("filename"),
-            action=json.loads(job.get("action")),
-            created_at=job.get("created_at"),
-            updated_at=job.get("updated_at"),
-            filetype=job.get("filetype"),
+            uid=str(job.get("uid")),
+            input=job.get("input"),
+            action=job.get("action"),
+            created_at=str(job.get("created_at")),
+            updated_at=str(job.get("updated_at")),
             retries=job.get("retries"),
             status=job.get("status"),
-            version=job.get("version"),
+            output_version=job.get("output_version"),
         )
 
     @staticmethod
     async def enqueue(db: asyncpg.Connection, job: Job):
-        job.action = json.dumps(job.action)
-        await create(db, "jobs", **asdict(job))
+        await create(db, "jobs", job.model_dump())
+        logger.info(f"Enqueued job {job}")
 
 
 class WorkerPool:

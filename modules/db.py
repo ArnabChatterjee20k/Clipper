@@ -1,6 +1,7 @@
 from .logger import logger
-import enum
+import enum, json
 from dataclasses import dataclass, field
+from pydantic import BaseModel, UUID4
 from typing import Annotated, Optional, Literal
 from datetime import datetime
 from fastapi import Depends
@@ -18,6 +19,10 @@ async def get_db():
     conn: asyncpg.Connection = await asyncpg.connect(
         "postgresql://clipper:clipper@localhost:5432/clipper"
     )
+    await conn.set_type_codec(
+        "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+    )
+
     yield conn
 
 
@@ -42,17 +47,19 @@ class File:
     created_at: datetime = datetime.now()
 
 
-@dataclass
-class Job:
-    filename: str
-    filetype: str
-    action: dict
+class Job(BaseModel):
+    uid: UUID4
+    input: str
+    action: list[dict]
     status: str
     id: Optional[int] = None
+    output: Optional[dict] = None
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
-    version: int = 0
+    output_version: int = 0
     retries: int = 0
+    progress: int = 0
+    error: Optional[str] = None
 
 
 # TODO: add indexes
@@ -84,15 +91,17 @@ async def load_schemas():
         await db.execute(f"""
                 CREATE TABLE IF NOT EXISTS jobs(
                     id serial PRIMARY KEY,
-                    filename VARCHAR(50) NOT NULL,
-                    filetype  VARCHAR(20),
-                    bucketname VARCHAR(50),
+                    uid UUID NOT NULL,
                     created_at timestamp NOT NULL,
                     updated_at timestamp NOT NULL,
-                    version smallint DEFAULT 0,
+                    output_version smallint DEFAULT 0,
+                    input TEXT NOT NULL,
+                    output jsonb,
                     action jsonb NOT NULL,
                     status VARCHAR(20) DEFAULT '{JobStatus.QUEUED.value}',
-                    retries smallint DEFAULT 0
+                    retries smallint DEFAULT 0,
+                    error TEXT,
+                    progress smallint DEFAULT 0
                 )
             """)
         logger.info("jobs table created")
@@ -129,10 +138,12 @@ async def read(
     last_id=0,
 ) -> list[asyncpg.Record]:
     where_columns, where_placeholder, where_values = prepare(filters)
-    where_clause_literals = [
-        f"{col}={placeholder}"
-        for col, placeholder in zip(where_columns, where_placeholder)
-    ]
+    where_clause_literals = []
+    if where_columns and where_placeholder:
+        where_clause_literals = [
+            f"{col}={placeholder}"
+            for col, placeholder in zip([where_columns], [where_placeholder])
+        ]
     where_clause_literals.append(f"id > {last_id}")
     where_clause = f" {condition} ".join(where_clause_literals)
     sql = f"SELECT * from {table} WHERE {where_clause} ORDER BY id ASC LIMIT {limit}"

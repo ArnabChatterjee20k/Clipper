@@ -1,12 +1,18 @@
-import io
-from typing import Union, Annotated
+import io, asyncio
+from uuid import uuid4
+from typing import Annotated
 from fastapi import FastAPI, File, UploadFile, Request
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from modules.logger import logger
 from modules.buckets import load_buckets, upload_file, get_url, PRIMARY_BUCKET
 from modules.db import DBSession, load_schemas, create, read, File as FileModel
+from modules.worker import Job, JobStatus, Worker
+from modules.video_processor import VideoBuilder
 from dataclasses import asdict
-from modules.responses import FileResponse, FileListResponse
+from modules.responses import FileResponse, FileListResponse, VideoEditResponse
+from modules.requests import VideoEditRequest
+from consumers import ConsumerManager
 from contextlib import asynccontextmanager
 
 
@@ -14,7 +20,10 @@ from contextlib import asynccontextmanager
 async def lifecycle(app):
     await load_buckets()
     await load_schemas()
+    consumer = ConsumerManager()
+    await consumer.start()
     yield
+    await consumer.stop()
 
 
 app = FastAPI(lifespan=lifecycle)
@@ -27,6 +36,15 @@ async def exception_handler(request: Request, call_next):
     except Exception as e:
         logger.error(e)
         return JSONResponse(content="Something went wrong", status_code=500)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # bucket/files
@@ -67,4 +85,45 @@ async def list_files(db: DBSession, page: int = 1, limit: int = 20):
     return FileListResponse(files=result, total=len(result))
 
 
-# EDIT
+@app.post("/edits")
+async def edit_video(edit: VideoEditRequest, db: DBSession):
+    uid = uuid4()
+    builder = VideoBuilder(edit.media)
+    # validating first then enqueueing
+    for operation in edit.operations:
+        builder = builder.load(
+            operation.op, **operation.model_dump(exclude=["op", "media"])
+        )
+    actions = [operation.model_dump() for operation in edit.operations]
+    await Worker.enqueue(
+        db,
+        Job(
+            uid=str(uid),
+            input=edit.media,
+            action=actions,
+            status=JobStatus.QUEUED.value,
+        ),
+    )
+    return VideoEditResponse(id=str(uid), operations=edit.operations, media=edit.media)
+
+
+@app.get("/edits/status")
+async def stream_jobs(uid: str, db: DBSession):
+
+    async def event_stream():
+        last_seen = {}
+
+        while True:
+            jobs = await read(db, "jobs", filters={"uid": uid}, limit=1)
+            jobs = [Job(**job) for job in jobs]
+            for job in jobs:
+                jid = job.id
+                version = job.updated_at
+
+                if last_seen.get(jid) != version:
+                    last_seen[jid] = version
+                    yield f"event: job_update\ndata: {job.model_dump_json()}\n\n"
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

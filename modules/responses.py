@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List
+from .requests import VideoOperationStep
 
 
 class FileResponse(BaseModel):
@@ -12,3 +13,9 @@ class FileResponse(BaseModel):
 class FileListResponse(BaseModel):
     files: List[FileResponse]
     total: int
+
+
+class VideoEditResponse(BaseModel):
+    id: str
+    media: str
+    operations: List[VideoOperationStep]
