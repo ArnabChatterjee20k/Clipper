@@ -194,7 +194,9 @@ class TranscodeOptions(BaseModel):
     scale: Optional[str] = None  # e.g. "1280:-1" -> -vf scale=...
 
 
-def get_progress(total_duration: int, line: str, progress_callback: ProgressCallaback):
+async def get_progress(
+    total_duration: int, line: str, progress_callback: ProgressCallaback
+):
     match = re.search(r"out_time_ms=(\d+)", line)
     if match:
         current_ms = int(match.group(1))
@@ -202,7 +204,7 @@ def get_progress(total_duration: int, line: str, progress_callback: ProgressCall
         progress = (
             min(100, (current_sec / total_duration) * 100) if total_duration > 0 else 0
         )
-        progress_callback(progress)
+        await progress_callback(progress)
 
 
 def get_cmd(input: list[str]):
@@ -280,7 +282,7 @@ async def execute(
             line = line.decode(errors="replace").rstrip()
             std_error.append(line)
             if progress_callback and total_duration is not None and total_duration > 0:
-                get_progress(total_duration, line, progress_callback)
+                await get_progress(total_duration, line, progress_callback)
 
     std_error_task = asyncio.create_task(read_stderr())
 
@@ -298,6 +300,9 @@ async def execute(
         error: Optional[str] = None
         if process.returncode != 0:
             error = "\n".join(std_error[-100:])
+            raise RuntimeError(
+                f"ffmpeg/ffprobe exited with code {process.returncode}: {error}"
+            )
         result = ExecutionResult(
             start_time=start_time,
             end_time=end_time,
@@ -999,6 +1004,40 @@ class VideoBuilder:
 
         if not hasattr(self, method_name):
             raise ValueError(f"No processor method found for {op} operation")
+
+        # Normalize payload: from JSON these are dicts; convert to models where needed
+        if op == "text":
+            raw = kwargs.get("segment")
+            if raw is not None:
+                segments = raw if isinstance(raw, list) else [raw]
+                kwargs["segment"] = [
+                    TextSegment.model_validate(s) if isinstance(s, dict) else s
+                    for s in segments
+                ]
+        elif op == "speed":
+            raw = kwargs.get("segment")
+            if raw is not None:
+                segments = raw if isinstance(raw, list) else [raw]
+                kwargs["segment"] = [
+                    SpeedSegment.model_validate(s) if isinstance(s, dict) else s
+                    for s in segments
+                ]
+        elif op == "watermark":
+            overlay = kwargs.get("overlay", kwargs)
+            if isinstance(overlay, dict):
+                kwargs = {"overlay": WatermarkOverlay.model_validate(overlay)}
+        elif op == "backgroundColor":
+            overlay = kwargs.get("overlay", kwargs)
+            if isinstance(overlay, dict):
+                kwargs = {"overlay": BackgroundColor.model_validate(overlay)}
+        elif op == "audio":
+            overlay = kwargs.get("overlay")
+            if isinstance(overlay, dict):
+                kwargs = {**kwargs, "overlay": AudioOverlay.model_validate(overlay)}
+        elif op == "transcode":
+            options = kwargs.get("options")
+            if isinstance(options, dict):
+                kwargs = {**kwargs, "options": TranscodeOptions.model_validate(options)}
 
         method = getattr(self, method_name)
         builder = method(**kwargs)

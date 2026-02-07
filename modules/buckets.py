@@ -1,5 +1,6 @@
 import boto3, botocore
 import asyncio
+from urllib.parse import urlparse
 from typing import BinaryIO
 
 PRIMARY_BUCKET = "primary"
@@ -53,3 +54,8 @@ def get_url(filename: str, bucketname: str, upload=False):
         Params={"Bucket": bucketname, "Key": filename},
         ExpiresIn=7200,
     )
+
+
+def get_filename_from_url(url: str) -> str:
+    parsed_url = urlparse(url)
+    return parsed_url.path.split("/")[-1] if parsed_url else ""

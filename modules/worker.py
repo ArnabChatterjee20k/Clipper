@@ -1,8 +1,12 @@
+import io
 import asyncio
 import asyncpg
+import json
+from dataclasses import dataclass, asdict
 from .logger import logger
-from .db import get_db, create, Job, JobStatus
+from .db import get_db, create, Job, JobStatus, OutputFile, File as BucketFileModel
 from .video_processor import VideoBuilder
+from .buckets import upload_file, PRIMARY_BUCKET, get_filename_from_url
 
 
 # TODO: Add dead-jobs(cancellation status), heartbeat(progress update for long running jobs to know its running or not), logging worker health -> also need to check whether the worker is still processing or not
@@ -28,6 +32,7 @@ class Worker:
         await self._get_db()
         self._running = True
         logger.info(f"Worker {self._id} started")
+        job = None
         while self._running:
             try:
                 job = await self.dequeue()
@@ -35,13 +40,94 @@ class Worker:
                     await asyncio.sleep(self._wait)
                     continue
                 logger.info(f"Worker {self._id} processing: {job.model_dump_json()}")
+                await self._process_job(job)
                 await self.complete(job.id)
                 logger.info(
                     f"Worker {self._id} finished processing: {job.model_dump_json()}"
                 )
             except Exception as e:
-                logger.error(f"Error in Worker {self._id}: {str(e)}")
+                err = str(e)
+
+                logger.error(f"Worker {self._id} error: {err}")
+
+                if job is not None:
+                    try:
+                        await self.error(job, err)
+                    except Exception as db_err:
+                        logger.error(
+                            f"Worker {self._id} failed to update error state: {db_err}"
+                        )
                 await asyncio.sleep(self._wait)
+
+    async def _process_job(self, job: Job):
+        db = await self._get_db()
+
+        async def update_job_progress(result: int):
+            try:
+                sql = f"""
+                    UPDATE jobs
+                    SET progress = {int(min(100, max(0, round(result))))}, updated_at = CURRENT_TIMESTAMP
+                    WHERE jobs.id = '{job.id}'
+                    RETURNING jobs.*
+                """
+                await db.fetch(sql)
+                logger.info(
+                    f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] Progress: {result}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] Failed to update progress: {e}"
+                )
+
+        builder = VideoBuilder(
+            job.input,
+            complete_callback=lambda e: logger.info(
+                f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] Completed"
+            ),
+            progress_callback=update_job_progress,
+        )
+        for operation in job.action:
+            op_spec = dict(operation)
+            op = op_spec.pop("op")
+            builder = builder.load(op, **op_spec)
+        result = await builder.export_to_bytes()
+        full_filename = get_filename_from_url(job.input)
+        filename, extension = full_filename.split(".")
+        filename = f"{filename}_{job.uid}_{job.output_version}.{extension}"
+        try:
+            async with db.transaction():
+                sql = f"""
+                    UPDATE jobs
+                    SET output = $1, updated_at = CURRENT_TIMESTAMP
+                    WHERE jobs.id = '{job.id}'
+                    RETURNING jobs.*
+                """
+                await db.fetch(
+                    sql,
+                    json.dumps(
+                        asdict(
+                            OutputFile(
+                                filename=filename,
+                                audio_bitrate=builder._audio_bitrate,
+                                video_format=builder._video_format,
+                                audio_format=builder._audio_format,
+                            )
+                        )
+                    ),
+                )
+                await create(
+                    db,
+                    "files",
+                    **asdict(BucketFileModel(name=filename, bucketname=PRIMARY_BUCKET)),
+                )
+                await upload_file(io.BytesIO(result), PRIMARY_BUCKET, filename=filename)
+            logger.info(
+                f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [OUTPUT FILE]  {filename}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [ERROR OUTPUT UPLOAD] Error {e}"
+            )
 
     async def stop(self):
         self._running = False
@@ -56,16 +142,14 @@ class Worker:
         logger.info(f"Worker {self._id} stopped")
 
     async def dequeue(self) -> Job:
-        # using a CTE to select and update in a single query -> Atomic update(select+update) -> no need of explicit transaction
-        # TODO: study why it is good for concurrency and why FOR UPDATE works better with CTE and not with subqueries
+        # using a CTE to select and update in a single query -> Atomic update(read+modify+write) -> no need of explicit transaction
         # also making sure to have a DAG pattern as well so that deque. Ex -> dont deque 1 if 0 doesn't exists
-        # TODO: look at the performance
         # TODO: need to think about the retrial here -> one worker would get busy or shall skip and let the other does the thing?
         sql = f"""
                 WITH current_job AS(
                     SELECT j.id
                     FROM jobs j
-                    WHERE status = '{JobStatus.PROCESSING.value}' AND retries <= {self._max_retries}
+                    WHERE status = '{JobStatus.QUEUED.value}' AND retries <= {self._max_retries}
                     AND NOT EXISTS(
                         SELECT 1 FROM jobs prev
                         WHERE prev.uid = j.uid
@@ -100,20 +184,13 @@ class Worker:
 
     async def cancel(self, job_id: int) -> Job:
         sql = f"""
-                WITH current_job AS(
-                    SELECT id
-                    FROM jobs
-                    WHERE id=$1
-                    FOR UPDATE
-                )
                 UPDATE jobs
                 SET status = '{JobStatus.CANCELLED.value}', updated_at = CURRENT_TIMESTAMP
-                FROM current_job
-                WHERE jobs.id = current_job.id
+                WHERE jobs.id = '{job_id}'
                 RETURNING jobs.*
             """
         # using parameterised query for user input and not for the internal enum value
-        jobs: list[asyncpg.Record] = await (await self._get_db()).fetch(sql, job_id)
+        jobs: list[asyncpg.Record] = await (await self._get_db()).fetch(sql)
         if not jobs:
             return None
         job = jobs[0]
@@ -131,19 +208,12 @@ class Worker:
 
     async def complete(self, job_id: int):
         sql = f"""
-                WITH current_job AS(
-                    SELECT id
-                    FROM jobs
-                    WHERE id=$1
-                    FOR UPDATE
-                )
                 UPDATE jobs
                 SET status = '{JobStatus.COMPLETED.value}', updated_at = CURRENT_TIMESTAMP
-                FROM current_job
-                WHERE jobs.id = current_job.id
+                WHERE jobs.id = '{job_id}'
                 RETURNING jobs.*
             """
-        jobs: list[asyncpg.Record] = await (await self._get_db()).fetch(sql, job_id)
+        jobs: list[asyncpg.Record] = await (await self._get_db()).fetch(sql)
         if not jobs:
             return None
         job = jobs[0]
@@ -158,6 +228,23 @@ class Worker:
             status=job.get("status"),
             output_version=job.get("output_version"),
         )
+
+    async def error(self, job: Job, err: str):
+        sql = f"""
+                UPDATE jobs
+                SET status = '{JobStatus.ERROR.value}', 
+                    updated_at = CURRENT_TIMESTAMP,
+                    retries = jobs.retries + 1,
+                    error = $1
+                WHERE jobs.id = '{job.id}'
+                RETURNING jobs.*
+            """
+        try:
+            await (await self._get_db()).fetch(sql, err)
+        except Exception as e:
+            logger.error(
+                f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [SQL {sql}] [ERROR REPORTED {err}] Error {e}"
+            )
 
     @staticmethod
     async def enqueue(db: asyncpg.Connection, job: Job):

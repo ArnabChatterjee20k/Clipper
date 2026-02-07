@@ -13,6 +13,7 @@ class JobStatus(enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    ERROR = "error"
 
 
 async def get_db():
@@ -62,6 +63,14 @@ class Job(BaseModel):
     error: Optional[str] = None
 
 
+@dataclass
+class OutputFile:
+    filename: str
+    video_format: str
+    audio_format: str
+    audio_bitrate: str
+
+
 # TODO: add indexes
 async def load_schemas():
     async for db in get_db():
@@ -69,7 +78,7 @@ async def load_schemas():
         await db.execute("""
                 CREATE TABLE IF NOT EXISTS buckets(
                     id serial PRIMARY KEY,
-                    name VARCHAR(50),
+                    name VARCHAR(200),
                     created_at timestamp
                 )
             """)
@@ -79,7 +88,7 @@ async def load_schemas():
         await db.execute("""
                 CREATE TABLE IF NOT EXISTS files(
                     id serial PRIMARY KEY,
-                    name VARCHAR(50),
+                    name VARCHAR(200),
                     bucketname VARCHAR(50),
                     filetype  VARCHAR(20),
                     created_at timestamp
@@ -114,19 +123,6 @@ async def create(db: asyncpg.Connection, table: TABLE, **records) -> int:
     sql = f"INSERT INTO {table} ({columns}) values ({values_placeholder}) returning id"
     result = await db.fetch(sql, *values)
     return (result[0] if result else {}).get("id")
-
-
-async def update(
-    db: asyncpg.Connection,
-    table: TABLE,
-    record: dict,
-    filters: dict,
-    filter_condition: CONDITION = "AND",
-):
-    # columns, values_placeholder, values = prepare(record)
-
-    # sql = f'UPDATE {table} SET {columns} WHERE '
-    pass
 
 
 async def read(
