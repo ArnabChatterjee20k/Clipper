@@ -2,11 +2,19 @@ import io
 import asyncio
 import asyncpg
 import json
+import time
 from dataclasses import dataclass, asdict
 from .logger import logger
 from .db import get_db, create, Job, JobStatus, OutputFile, File as BucketFileModel
 from .video_processor import VideoBuilder
 from .buckets import upload_file, PRIMARY_BUCKET, get_filename_from_url
+from .metrics import (
+    job_enqueue_duration_seconds,
+    job_processing_duration_seconds,
+    worker_jobs_picked_total,
+    job_status_total,
+    job_queue_depth,
+)
 
 
 # TODO: Add dead-jobs(cancellation status), heartbeat(progress update for long running jobs to know its running or not), logging worker health -> also need to check whether the worker is still processing or not
@@ -39,6 +47,10 @@ class Worker:
                 if not job:
                     await asyncio.sleep(self._wait)
                     continue
+                job_status_total.labels(status=JobStatus.PROCESSING.value).inc()
+                worker_jobs_picked_total.labels(worker_id=self._id).inc()
+                job_queue_depth.labels(status=JobStatus.PROCESSING.value).inc()
+                job_queue_depth.labels(status=JobStatus.QUEUED.value).dec()
                 logger.info(f"Worker {self._id} processing: {job.model_dump_json()}")
                 await self._process_job(job)
                 await self.complete(job.id)
@@ -58,6 +70,8 @@ class Worker:
                             f"Worker {self._id} failed to update error state: {db_err}"
                         )
                 await asyncio.sleep(self._wait)
+            finally:
+                job_queue_depth.labels(status=JobStatus.PROCESSING.value).dec()
 
     async def _process_job(self, job: Job):
         db = await self._get_db()
@@ -79,6 +93,7 @@ class Worker:
                     f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] Failed to update progress: {e}"
                 )
 
+        start_time = time.monotonic()
         builder = VideoBuilder(
             job.input,
             complete_callback=lambda e: logger.info(
@@ -121,10 +136,20 @@ class Worker:
                     **asdict(BucketFileModel(name=filename, bucketname=PRIMARY_BUCKET)),
                 )
                 await upload_file(io.BytesIO(result), PRIMARY_BUCKET, filename=filename)
+            duration_ms = (time.monotonic() - start_time) * 1000
+            job_processing_duration_seconds.labels(
+                status=JobStatus.COMPLETED.value
+            ).observe(duration_ms)
+            job_status_total.labels(status=JobStatus.COMPLETED.value).inc()
             logger.info(
                 f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [OUTPUT FILE]  {filename}"
             )
         except Exception as e:
+            duration_ms = (time.monotonic() - start_time) * 1000
+            job_status_total.labels(status=JobStatus.ERROR.value).inc()
+            job_processing_duration_seconds.labels(
+                status=JobStatus.ERROR.value
+            ).observe(duration_ms)
             logger.error(
                 f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [ERROR OUTPUT UPLOAD] Error {e}"
             )
@@ -248,7 +273,10 @@ class Worker:
 
     @staticmethod
     async def enqueue(db: asyncpg.Connection, job: Job):
-        await create(db, "jobs", job.model_dump())
+        with job_enqueue_duration_seconds.time():
+            job_status_total.labels(status=job.status).inc()
+            job_queue_depth.labels(status=job.status).inc()
+            await create(db, "jobs", **job.model_dump())
         logger.info(f"Enqueued job {job}")
 
 

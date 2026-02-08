@@ -33,6 +33,12 @@ resource -> edit
 
 * Video -> trim, format
 
+### Metrics
+* Actions -> queued, processing, completed, failed, error, processing time (can't be done per operation as it can have a single comnplex operation)
+* Worker -> Enqueue, dequeue, process -> time
+
+Actions status itself can say whats the performance of our worker pool -> how many in different status
+
 ### Workflow
 * Worker side
 worker gonna poll postgres

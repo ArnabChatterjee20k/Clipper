@@ -3,7 +3,7 @@ from uuid import uuid4
 from typing import Annotated
 from fastapi import FastAPI, File, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from modules.logger import logger
 from modules.buckets import load_buckets, upload_file, get_url, PRIMARY_BUCKET
 from modules.db import DBSession, load_schemas, create, read, File as FileModel
@@ -12,6 +12,8 @@ from modules.video_processor import VideoBuilder
 from dataclasses import asdict
 from modules.responses import FileResponse, FileListResponse, VideoEditResponse
 from modules.requests import VideoEditRequest
+from modules.metrics import registry
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from consumers import ConsumerManager
 from contextlib import asynccontextmanager
 
@@ -45,6 +47,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.route("/metrics")
+def metrics(*args):
+    data = generate_latest(registry)
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
 
 # bucket/files
