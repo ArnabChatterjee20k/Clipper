@@ -83,6 +83,7 @@ async def test_process_job_sets_output_and_completes(worker, db):
         mock_builder._audio_bitrate = "192k"
         mock_builder._video_format = "mp4"
         mock_builder._audio_format = "libmp3lame"
+        mock_builder._gif_options = None  # trim job → .mp4 extension
 
         with (
             patch("modules.worker.VideoBuilder", return_value=mock_builder),

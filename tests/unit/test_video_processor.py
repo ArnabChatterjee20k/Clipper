@@ -16,9 +16,11 @@ from modules.video_processor import (
     AudioOverlay,
     BackgroundColor,
     TranscodeOptions,
+    GifOptions,
     _atempo_chain,
     _build_concat_manifest,
     _resolve_end_sec,
+    _parse_ss_seconds,
 )
 
 # --- Fixtures and helpers ---
@@ -502,6 +504,64 @@ class TestBuilderChaining:
     def test_compress_returns_self(self):
         b = VideoBuilder("x.mp4")
         assert b.compress(scale="640:-1") is b
+
+    def test_create_gif_returns_self(self):
+        b = VideoBuilder("x.mp4")
+        opts = GifOptions(start_time="00:00:01", duration=5, fps=10, scale=480)
+        assert b.create_gif(opts) is b
+        assert b._gif_options is opts
+
+
+# --- GIF ---
+
+
+class TestParseSsSeconds:
+    def test_zero(self):
+        assert _parse_ss_seconds("00:00:00") == 0.0
+
+    def test_one_minute(self):
+        assert _parse_ss_seconds("00:01:00") == 60.0
+
+    def test_hms(self):
+        assert _parse_ss_seconds("01:30:45") == 3600 + 30 * 60 + 45
+
+    def test_with_ms(self):
+        assert _parse_ss_seconds("00:00:01.5") == 1.5
+
+
+class TestGifBuild:
+    def test_build_gif_cmd_defaults(self):
+        b = VideoBuilder("input.mp4")
+        b._gif_options = GifOptions()
+        cmd = b._build_gif_cmd()
+        assert "-ss" in cmd
+        assert cmd[cmd.index("-ss") + 1] == "00:00:00"
+        assert "-t" in cmd
+        assert cmd[cmd.index("-t") + 1] == "5"
+        assert "-i" in cmd
+        assert cmd[cmd.index("-i") + 1] == "input.mp4"
+        assert "fps=10" in cmd[cmd.index("-vf") + 1]
+        assert "scale=480" in cmd[cmd.index("-vf") + 1]
+        assert "palettegen" in cmd[cmd.index("-vf") + 1]
+        assert "-loop" in cmd
+        assert cmd[cmd.index("-loop") + 1] == "0"
+        assert "-f" in cmd
+        assert cmd[cmd.index("-f") + 1] == "gif"
+
+    def test_build_gif_cmd_custom(self):
+        b = VideoBuilder("video.mov")
+        b._gif_options = GifOptions(
+            start_time="00:01:30",
+            duration=3,
+            fps=8,
+            scale=320,
+        )
+        cmd = b._build_gif_cmd()
+        assert cmd[cmd.index("-ss") + 1] == "00:01:30"
+        assert cmd[cmd.index("-t") + 1] == "3"
+        vf = cmd[cmd.index("-vf") + 1]
+        assert "fps=8" in vf
+        assert "scale=320" in vf
 
 
 # --- Concat ---

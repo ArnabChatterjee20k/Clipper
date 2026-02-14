@@ -237,6 +237,38 @@ async def test_edit_extract_audio_stored_in_db(
 
 
 @pytest.mark.e2e
+async def test_edit_gif_stored_in_db(client, db, demo_media_url, delete_jobs_by_uid):
+    body = _body(
+        demo_media_url,
+        [
+            {
+                "op": "gif",
+                "start_time": "00:00:01",
+                "duration": 3,
+                "fps": 8,
+                "scale": 320,
+            }
+        ],
+    )
+    r = await client.post("/edits", json=body)
+    assert r.status_code == 200
+    uid = r.json()["id"]
+    try:
+        jobs = await read(db, "jobs", {"uid": uid}, limit=5)
+        assert len(jobs) >= 1
+        row = jobs[0]
+        assert row["input"] == demo_media_url
+        assert row["action"][0]["op"] == "gif"
+        d = row["action"][0]["data"]
+        assert d["start_time"] == "00:00:01"
+        assert d["duration"] == 3
+        assert d["fps"] == 8
+        assert d["scale"] == 320
+    finally:
+        await delete_jobs_by_uid(uid)
+
+
+@pytest.mark.e2e
 async def test_edit_concat_stored_in_db(client, db, demo_media_url, delete_jobs_by_uid):
     # concat requires input_paths (at least 2)
     body = _body(

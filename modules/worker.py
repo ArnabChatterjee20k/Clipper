@@ -107,8 +107,12 @@ class Worker:
             builder = builder.load(op, data=data)
         result = await builder.export_to_bytes()
         full_filename = get_filename_from_url(job.input)
-        filename, extension = full_filename.split(".")
-        filename = f"{filename}_{job.uid}_{job.output_version}.{extension}"
+        base, _, ext = full_filename.rpartition(".")
+        base = base or full_filename
+        if getattr(builder, "_gif_options", None) is not None:
+            ext = "gif"
+        ext = ext or "mp4"
+        filename = f"{base}_{job.uid}_{job.output_version}.{ext}"
         try:
             async with db.transaction():
                 sql = f"""

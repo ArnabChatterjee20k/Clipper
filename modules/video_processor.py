@@ -47,6 +47,20 @@ def _parse_fps(r_frame_rate: str) -> float:
         return 0.0
 
 
+def _parse_ss_seconds(timestr: str) -> float:
+    """Parse -ss style timestr (HH:MM:SS or HH:MM:SS.mmm) to seconds."""
+    if not timestr:
+        return 0.0
+    parts = timestr.strip().split(":")
+    try:
+        h = int(parts[0]) if len(parts) > 0 else 0
+        m = int(parts[1]) if len(parts) > 1 else 0
+        s = float(parts[2]) if len(parts) > 2 else 0.0
+        return h * 3600 + m * 60 + s
+    except (ValueError, IndexError):
+        return 0.0
+
+
 @dataclass
 class ExecutionResult:
     processing_time: float
@@ -192,6 +206,16 @@ class TranscodeOptions(BaseModel):
         None  # target file size in MB -> computes -b:v, -maxrate, -bufsize
     )
     scale: Optional[str] = None  # e.g. "1280:-1" -> -vf scale=...
+
+
+class GifOptions(BaseModel):
+    """Options for GIF export (segment of video as animated GIF)."""
+
+    start_time: str = "00:00:00"  # -ss
+    duration: int = 5  # -t seconds
+    fps: int = 10
+    scale: int = 480  # width, height auto
+    output_codec: str = "gif"
 
 
 @dataclass
@@ -404,6 +428,10 @@ class VideoBuilder:
             method="transcode",
             model=TranscodeOptions,
         ),
+        "gif": OperationSpec(
+            method="create_gif",
+            model=GifOptions,
+        ),
     }
 
     def __init__(
@@ -431,6 +459,7 @@ class VideoBuilder:
         self._background_audio: Optional[AudioOverlay] = None
         self._background_color: Optional[BackgroundColor] = None
         self._transcode: Optional[TranscodeOptions] = None
+        self._gif_options: Optional[GifOptions] = None
 
     @staticmethod
     def get_video_info(input_path: str) -> VideoInfo:
@@ -617,6 +646,11 @@ class VideoBuilder:
             target_size_mb=target_size_mb,
             scale=scale,
         )
+        return self
+
+    def create_gif(self, options: GifOptions) -> "VideoBuilder":
+        """Set GIF export options. When set, export_to_bytes() produces an animated GIF."""
+        self._gif_options = options
         return self
 
     def _build_filter_complex(
@@ -924,8 +958,54 @@ class VideoBuilder:
             cmd_parts.extend(["-b:a", opts.audio_bitrate])
         return cmd_parts
 
+    def _build_gif_cmd(self) -> list[str]:
+        """Build ffmpeg command for GIF export (palettegen/paletteuse)."""
+        o = self._gif_options
+        if not o:
+            raise RuntimeError("GIF options not set")
+        vf = (
+            f"fps={o.fps},scale={o.scale}:-1:flags=lanczos,"
+            "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"
+        )
+        return [
+            ffmpeg,
+            "-ss",
+            o.start_time,
+            "-t",
+            str(o.duration),
+            "-i",
+            self.input_path,
+            "-vf",
+            vf,
+            "-loop",
+            "0",
+            "-f",
+            o.output_codec,
+        ]
+
     async def export(self) -> AsyncGenerator[bytes, None, None]:
         """Build one ffmpeg command with all filters and stream output."""
+        if self._gif_options is not None:
+            info = await asyncio.to_thread(
+                lambda: VideoBuilder.get_video_info(self.input_path)
+            )
+            if info.error or info.duration is None:
+                raise RuntimeError(f"Invalid input or no duration: {info.error}")
+            cmd = get_cmd(self._build_gif_cmd())
+            total_duration = min(
+                self._gif_options.duration,
+                (info.duration or 0) - _parse_ss_seconds(self._gif_options.start_time),
+            )
+            async for chunk in execute(
+                cmd,
+                self.input_path,
+                self._chunk_size,
+                complete_callback=self.complete_callback,
+                progress_callback=self.progress_callback,
+                total_duration=max(0, total_duration),
+            ):
+                yield chunk
+            return
         info = await asyncio.to_thread(
             lambda: VideoBuilder.get_video_info(self.input_path)
         )

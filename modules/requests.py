@@ -126,6 +126,15 @@ class ExtractAudioOp(VideoEditOperation):
         return {}
 
 
+class GifOp(VideoEditOperation):
+    op: Literal["gif"]
+    start_time: str = "00:00:00"
+    duration: int = 5
+    fps: int = 10
+    scale: int = 480
+    output_codec: str = "gif"
+
+
 # discriminator works only on Union and not on the list
 VideoOperationStep = Annotated[
     Union[
@@ -139,6 +148,7 @@ VideoOperationStep = Annotated[
         CompressOp,
         ConcatOp,
         ExtractAudioOp,
+        GifOp,
     ],
     Field(discriminator="op"),
 ]
