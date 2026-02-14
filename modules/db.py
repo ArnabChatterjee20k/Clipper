@@ -37,7 +37,7 @@ TABLE = Literal["buckets", "files", "jobs"]
 class Bucket:
     id: Optional[int] = field(init=False, default=-1)
     name: str
-    create_at: datetime = datetime.now()
+    created_at: datetime = datetime.now()
 
 
 @dataclass
@@ -97,6 +97,7 @@ async def load_schemas():
         logger.info("files table created")
 
         logger.info("creating jobs table")
+        # input can be null as well in case of workflows better to check in the validator itself
         await db.execute(f"""
                 CREATE TABLE IF NOT EXISTS jobs(
                     id serial PRIMARY KEY,
@@ -104,7 +105,7 @@ async def load_schemas():
                     created_at timestamp NOT NULL,
                     updated_at timestamp NOT NULL,
                     output_version smallint DEFAULT 0,
-                    input TEXT NOT NULL,
+                    input TEXT,
                     output jsonb,
                     action jsonb NOT NULL,
                     status VARCHAR(20) DEFAULT '{JobStatus.QUEUED.value}',
@@ -123,6 +124,28 @@ async def create(db: asyncpg.Connection, table: TABLE, **records) -> int:
     sql = f"INSERT INTO {table} ({columns}) values ({values_placeholder}) returning id"
     result = await db.fetch(sql, *values)
     return (result[0] if result else {}).get("id")
+
+
+async def create_many(
+    db: asyncpg.Connection, table: TABLE, records: list[dict]
+) -> list:
+    if not records:
+        return []
+    first = dict(records[0])
+    if "id" in first:
+        first.pop("id")
+    columns = ",".join(first.keys())
+    values_placeholder = get_placeholder(len(first))
+    sql = f"INSERT INTO {table} ({columns}) VALUES ({values_placeholder})"
+    rows = []
+    for record in records:
+        rec = dict(record)
+        if "id" in rec:
+            rec.pop("id")
+        row = tuple(rec[k] for k in first.keys())
+        rows.append(row)
+    await db.executemany(sql, rows)
+    return []
 
 
 async def read(

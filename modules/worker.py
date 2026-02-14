@@ -3,9 +3,17 @@ import asyncio
 import asyncpg
 import json
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from .logger import logger
-from .db import get_db, create, Job, JobStatus, OutputFile, File as BucketFileModel
+from .db import (
+    get_db,
+    create,
+    create_many,
+    Job,
+    JobStatus,
+    OutputFile,
+    File as BucketFileModel,
+)
 from .video_processor import VideoBuilder
 from .buckets import upload_file, PRIMARY_BUCKET, get_filename_from_url
 from .metrics import (
@@ -112,7 +120,7 @@ class Worker:
         if getattr(builder, "_gif_options", None) is not None:
             ext = "gif"
         ext = ext or "mp4"
-        filename = f"{base}_{job.uid}_{job.output_version}.{ext}"
+        filename = f"{base}_output_{job.uid}_{job.output_version}.{ext}"
         try:
             async with db.transaction():
                 sql = f"""
@@ -276,12 +284,19 @@ class Worker:
             )
 
     @staticmethod
-    async def enqueue(db: asyncpg.Connection, job: Job):
+    async def enqueue(db: asyncpg.Connection, job: Job | list[Job]):
         with job_enqueue_duration_seconds.time():
-            job_status_total.labels(status=job.status).inc()
-            job_queue_depth.labels(status=job.status).inc()
-            await create(db, "jobs", **job.model_dump())
-        logger.info(f"Enqueued job {job}")
+            if isinstance(job, list):
+                for j in job:
+                    job_status_total.labels(status=j.status).inc()
+                    job_queue_depth.labels(status=j.status).inc()
+                await create_many(db, "jobs", [j.model_dump() for j in job])
+                logger.info(f"Enqueued {len(job)} jobs")
+            else:
+                job_status_total.labels(status=job.status).inc()
+                job_queue_depth.labels(status=job.status).inc()
+                await create(db, "jobs", **job.model_dump())
+                logger.info(f"Enqueued job {job}")
 
 
 class WorkerPool:

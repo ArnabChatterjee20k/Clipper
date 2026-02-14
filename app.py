@@ -1,17 +1,30 @@
 import io, asyncio
 from uuid import uuid4
 from typing import Annotated
-from fastapi import FastAPI, File, UploadFile, Request
+from fastapi import FastAPI, File, UploadFile, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from modules.logger import logger
 from modules.buckets import load_buckets, upload_file, get_url, PRIMARY_BUCKET
-from modules.db import DBSession, load_schemas, create, read, File as FileModel
+from modules.db import (
+    DBSession,
+    load_schemas,
+    create,
+    read,
+    create_many,
+    File as FileModel,
+    Bucket,
+)
 from modules.worker import Job, JobStatus, Worker
 from modules.video_processor import VideoBuilder
 from dataclasses import asdict
-from modules.responses import FileResponse, FileListResponse, VideoEditResponse
-from modules.requests import VideoEditRequest
+from modules.responses import (
+    FileResponse,
+    FileListResponse,
+    VideoEditResponse,
+    VideoWorkflowEditResponse,
+)
+from modules.requests import VideoEditRequest, VideoWorkflowEditRequest
 from modules.metrics import registry
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from consumers import ConsumerManager
@@ -31,13 +44,13 @@ async def lifecycle(app):
 app = FastAPI(lifespan=lifecycle)
 
 
-@app.middleware("http")
-async def exception_handler(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception as e:
-        logger.error(e)
-        return JSONResponse(content="Something went wrong", status_code=500)
+# @app.middleware("http")
+# async def exception_handler(request: Request, call_next):
+#     try:
+#         return await call_next(request)
+#     except Exception as e:
+#         logger.error(e)
+#         return JSONResponse(content="Something went wrong", status_code=500)
 
 
 app.add_middleware(
@@ -94,6 +107,9 @@ async def list_files(db: DBSession, page: int = 1, limit: int = 20):
     return FileListResponse(files=result, total=len(result))
 
 
+# TODO: add delete files from bucket, cancel edit, retry edit endpoint
+
+
 @app.post("/edits")
 async def edit_video(edit: VideoEditRequest, db: DBSession):
     uid = uuid4()
@@ -134,3 +150,35 @@ async def stream_jobs(uid: str, db: DBSession):
             await asyncio.sleep(1)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/workflows/")
+async def create_workflow(db: DBSession, workflows: VideoWorkflowEditRequest):
+    # TODO: add operational step for the concat videos and dag in worker to use output from first step in current step as input
+    # also alter the database
+    uid = uuid4()
+    jobs = []
+    responses = []
+    for version, workflow in enumerate(workflows.workflows):
+        builder = VideoBuilder(workflow.media)
+        for operation in workflow.operations:
+            builder = builder.load(operation.op, data=operation.get_data())
+        actions = [{"op": o.op, "data": o.get_data()} for o in workflow.operations]
+        jobs.append(
+            Job(
+                uid=str(uid),
+                input=workflow.media,
+                action=actions,
+                status=JobStatus.QUEUED.value,
+                output_version=version,
+            )
+        )
+        responses.append(
+            VideoEditResponse(
+                id=str(uid),
+                operations=workflow.operations,
+                media=workflow.media,
+            )
+        )
+    await Worker.enqueue(db, jobs)
+    return VideoWorkflowEditResponse(workflows=responses)

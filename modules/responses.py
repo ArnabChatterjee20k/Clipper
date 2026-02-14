@@ -19,3 +19,7 @@ class VideoEditResponse(BaseModel):
     id: str
     media: str
     operations: List[VideoOperationStep]
+
+
+class VideoWorkflowEditResponse(BaseModel):
+    workflows: List[VideoEditResponse]

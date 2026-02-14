@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional, Literal, Union, Annotated, Any
+from pydantic import BaseModel, Field, model_validator
+from typing import List, Optional, Literal, Union, Annotated, Any, Self
 from .video_processor import (
     WatermarkOverlay,
     TextSegment,
@@ -157,3 +157,15 @@ VideoOperationStep = Annotated[
 class VideoEditRequest(BaseModel):
     media: str
     operations: List[VideoOperationStep]
+
+
+class VideoWorkflowEditRequest(BaseModel):
+    workflows: List[VideoEditRequest]
+
+    @model_validator(mode="after")
+    def validate_workflow_media(self) -> Self:
+        first_workflow = self.workflows[0]
+        if not first_workflow.media:
+            raise ValueError(f"The first workflow edit should give the input media")
+
+        return self
