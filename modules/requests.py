@@ -8,6 +8,7 @@ from .video_processor import (
     BackgroundColor,
     TranscodeOptions,
 )
+from datetime import datetime
 
 
 def _to_data_dict(obj: Any) -> Any:
@@ -159,13 +160,10 @@ class VideoEditRequest(BaseModel):
     operations: List[VideoOperationStep]
 
 
-class VideoWorkflowEditRequest(BaseModel):
-    workflows: List[VideoEditRequest]
-
-    @model_validator(mode="after")
-    def validate_workflow_media(self) -> Self:
-        first_workflow = self.workflows[0]
-        if not first_workflow.media:
-            raise ValueError(f"The first workflow edit should give the input media")
-
-        return self
+class VideoWorkflowCreateRequest(BaseModel):
+    name: str
+    steps: List[List[VideoOperationStep]]
+    search: Optional[str] = None
+    id: Optional[int] = None
+    created_at: datetime = datetime.now()
+    updated_at: datetime = datetime.now()

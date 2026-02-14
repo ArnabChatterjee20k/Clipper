@@ -15,7 +15,7 @@ from .db import (
     File as BucketFileModel,
 )
 from .video_processor import VideoBuilder
-from .buckets import upload_file, PRIMARY_BUCKET, get_filename_from_url
+from .buckets import upload_file, PRIMARY_BUCKET, get_filename_from_url, get_url
 from .metrics import (
     job_enqueue_duration_seconds,
     job_processing_duration_seconds,
@@ -183,34 +183,51 @@ class Worker:
         # also making sure to have a DAG pattern as well so that deque. Ex -> dont deque 1 if 0 doesn't exists
         # TODO: need to think about the retrial here -> one worker would get busy or shall skip and let the other does the thing?
         sql = f"""
-                WITH current_job AS(
-                    SELECT j.id
+                WITH current_job AS (
+                    SELECT 
+                        j.*,
+                        (
+                            SELECT prev.output
+                            FROM jobs prev
+                            WHERE prev.uid = j.uid
+                            AND prev.output_version = j.output_version - 1
+                            LIMIT 1
+                        ) AS previous_output
                     FROM jobs j
-                    WHERE status = '{JobStatus.QUEUED.value}' AND retries <= {self._max_retries}
-                    AND NOT EXISTS(
-                        SELECT 1 FROM jobs prev
-                        WHERE prev.uid = j.uid
-                        AND prev.output_version = j.output_version - 1
-                        AND prev.status <> '{JobStatus.COMPLETED.value}'
-                    )
-                    ORDER BY created_at
+                    WHERE 
+                        j.status = '{JobStatus.QUEUED.value}'
+                        AND j.retries <= {self._max_retries}
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM jobs prev
+                            WHERE prev.uid = j.uid
+                            AND prev.output_version = j.output_version - 1
+                            AND prev.status <> '{JobStatus.COMPLETED.value}'
+                        )
+                    ORDER BY j.created_at
                     LIMIT 1
                     FOR UPDATE SKIP LOCKED
                 )
                 UPDATE jobs
-                SET status = '{JobStatus.PROCESSING.value}', updated_at = CURRENT_TIMESTAMP
+                SET 
+                    status = '{JobStatus.PROCESSING.value}',
+                    updated_at = CURRENT_TIMESTAMP
                 FROM current_job
                 WHERE jobs.id = current_job.id
-                RETURNING jobs.*
+                RETURNING jobs.*, current_job.previous_output;
             """
         jobs: list[asyncpg.Record] = await (await self._get_db()).fetch(sql)
         if not jobs:
             return None
         job = jobs[0]
+        input_val = job.get("input") or get_url(
+            json.loads(job.get("previous_output")).get("filename"),
+            bucketname=PRIMARY_BUCKET,
+        )
         return Job(
             id=job.get("id"),
             uid=str(job.get("uid")),
-            input=job.get("input"),
+            input=input_val,
             action=job.get("action"),
             created_at=str(job.get("created_at")),
             updated_at=str(job.get("updated_at")),

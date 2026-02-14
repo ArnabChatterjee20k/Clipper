@@ -30,7 +30,7 @@ async def get_db():
 DBSession = Annotated[asyncpg.Connection, Depends(get_db)]
 
 CONDITION = Literal["AND", "OR"]
-TABLE = Literal["buckets", "files", "jobs"]
+TABLE = Literal["buckets", "files", "jobs", "workflows"]
 
 
 @dataclass
@@ -50,7 +50,7 @@ class File:
 
 class Job(BaseModel):
     uid: UUID4
-    input: str
+    input: Optional[str]
     action: list[dict]
     status: str
     id: Optional[int] = None
@@ -115,6 +115,19 @@ async def load_schemas():
                 )
             """)
         logger.info("jobs table created")
+
+        logger.info("creating workflows table")
+        await db.execute(f"""
+                CREATE TABLE IF NOT EXISTS workflows(
+                    id serial PRIMARY KEY,
+                    name VARCHAR(500),
+                    search TEXT,
+                    created_at timestamp NOT NULL,
+                    updated_at timestamp NOT NULL,
+                    steps jsonb NOT NULL
+                )
+            """)
+        logger.info("workflows table created")
 
 
 async def create(db: asyncpg.Connection, table: TABLE, **records) -> int:

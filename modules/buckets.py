@@ -51,13 +51,22 @@ def get_url(filename: str, bucketname: str, upload=False):
     if not filename:
         raise ValueError("filename must be a non-empty string for presigned URL")
     client = get_client()
-    return client.generate_presigned_url(
+    url: str = client.generate_presigned_url(
         "get_object" if not upload else "put_object",
         Params={"Bucket": bucketname, "Key": filename},
         ExpiresIn=7200,
     )
+    return url.replace("localhost", "minik")
 
 
 def get_filename_from_url(url: str) -> str:
     parsed_url = urlparse(url)
     return parsed_url.path.split("/")[-1] if parsed_url else ""
+
+
+async def delete_file(filename: str, bucketname: str = PRIMARY_BUCKET) -> None:
+    """Remove object from S3. No-op if object does not exist."""
+    client = get_client()
+    await asyncio.to_thread(
+        lambda: client.delete_object(Bucket=bucketname, Key=filename)
+    )

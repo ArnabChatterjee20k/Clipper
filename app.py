@@ -1,19 +1,24 @@
 import io, asyncio
 from uuid import uuid4
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import FastAPI, File, UploadFile, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from modules.logger import logger
-from modules.buckets import load_buckets, upload_file, get_url, PRIMARY_BUCKET
+from modules.buckets import (
+    load_buckets,
+    upload_file,
+    get_url,
+    delete_file as s3_delete_file,
+    PRIMARY_BUCKET,
+)
 from modules.db import (
     DBSession,
     load_schemas,
     create,
     read,
-    create_many,
+    delete as db_delete,
     File as FileModel,
-    Bucket,
 )
 from modules.worker import Job, JobStatus, Worker
 from modules.video_processor import VideoBuilder
@@ -22,9 +27,10 @@ from modules.responses import (
     FileResponse,
     FileListResponse,
     VideoEditResponse,
-    VideoWorkflowEditResponse,
+    VideoWorkflowStep,
+    VideoWorkflowExecutionResponse,
 )
-from modules.requests import VideoEditRequest, VideoWorkflowEditRequest
+from modules.requests import VideoEditRequest, VideoWorkflowCreateRequest
 from modules.metrics import registry
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from consumers import ConsumerManager
@@ -107,7 +113,20 @@ async def list_files(db: DBSession, page: int = 1, limit: int = 20):
     return FileListResponse(files=result, total=len(result))
 
 
-# TODO: add delete files from bucket, cancel edit, retry edit endpoint
+@app.delete("/bucket/files/{file_id}")
+async def delete_file_from_bucket(file_id: int, db: DBSession):
+    row = await db.fetchrow("SELECT * FROM files WHERE id = $1", file_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found")
+    name = row.get("name")
+    bucketname = row.get("bucketname") or PRIMARY_BUCKET
+    try:
+        await s3_delete_file(name, bucketname)
+    except Exception:
+        pass  # object may already be missing
+    async with db.transaction():
+        await db_delete(db, "files", id=file_id)
+    return Response(status_code=204)
 
 
 @app.post("/edits")
@@ -132,12 +151,19 @@ async def edit_video(edit: VideoEditRequest, db: DBSession):
 
 @app.get("/edits/status")
 async def stream_jobs(uid: str, db: DBSession):
+    # Ensure uid matches DB UUID type (asyncpg expects UUID for uuid columns)
+    from uuid import UUID
+
+    try:
+        uid_val = UUID(uid)
+    except ValueError:
+        uid_val = uid
 
     async def event_stream():
         last_seen = {}
 
         while True:
-            jobs = await read(db, "jobs", filters={"uid": uid}, limit=1)
+            jobs = await read(db, "jobs", filters={"uid": uid_val}, limit=1)
             jobs = [Job(**job) for job in jobs]
             for job in jobs:
                 jid = job.id
@@ -149,36 +175,77 @@ async def stream_jobs(uid: str, db: DBSession):
 
             await asyncio.sleep(1)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
-@app.post("/workflows/")
-async def create_workflow(db: DBSession, workflows: VideoWorkflowEditRequest):
+@app.post("/workflows", response_model=VideoWorkflowCreateRequest)
+async def create_workflow(db: DBSession, workflow: VideoWorkflowCreateRequest):
+    for step in workflow.steps:
+        builder = VideoBuilder("")
+        # validation
+        for operation in step:
+            builder = builder.load(operation.op, data=operation.get_data())
+
+    workflow_id = await create(db, "workflows", **workflow.model_dump())
+    workflow.id = workflow_id
+    return workflow
+
+
+@app.post("/workflows/execute")
+async def execute_workflow(
+    db: DBSession,
+    media: str,
+    id: Optional[str] = None,
+    name: Optional[str] = None,
+    search: Optional[str] = None,
+):
     # TODO: add operational step for the concat videos and dag in worker to use output from first step in current step as input
     # also alter the database
+    # the workflow will be coming from the database
+    if not any((id, name, search)):
+        return HTTPException(
+            403, "Any of id, name or search should be give for executing workflows"
+        )
+    filters = {}
+    if id:
+        filters['id'] = id
+    if name:
+        filters["name"] = name
+    if search:
+        # should be done with like operator
+        filters['search'] = search
+
+    workflow = await read(db, "workflows", filters)
+    if not workflow:
+        return HTTPException(404, "No workflows found")
+    workflow = workflow[0]
+    workflow = VideoWorkflowCreateRequest(**workflow)
     uid = uuid4()
     jobs = []
     responses = []
-    for version, workflow in enumerate(workflows.workflows):
-        builder = VideoBuilder(workflow.media)
-        for operation in workflow.operations:
-            builder = builder.load(operation.op, data=operation.get_data())
-        actions = [{"op": o.op, "data": o.get_data()} for o in workflow.operations]
+    for version, workflow in enumerate(workflow.steps):
+        actions = [{"op": o.op, "data": o.get_data()} for o in workflow]
         jobs.append(
             Job(
                 uid=str(uid),
-                input=workflow.media,
+                input="",
                 action=actions,
                 status=JobStatus.QUEUED.value,
                 output_version=version,
             )
         )
+
         responses.append(
-            VideoEditResponse(
-                id=str(uid),
-                operations=workflow.operations,
-                media=workflow.media,
-            )
+            VideoWorkflowStep(uid=str(uid), operations=workflow, media=media)
         )
+    jobs[0].input = media
     await Worker.enqueue(db, jobs)
-    return VideoWorkflowEditResponse(workflows=responses)
+    return VideoWorkflowExecutionResponse(workflows=responses)

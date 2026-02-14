@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from .requests import VideoOperationStep
 
 
@@ -21,5 +21,11 @@ class VideoEditResponse(BaseModel):
     operations: List[VideoOperationStep]
 
 
-class VideoWorkflowEditResponse(BaseModel):
-    workflows: List[VideoEditResponse]
+class VideoWorkflowStep(BaseModel):
+    uid: str
+    media: Optional[str]
+    operations: List[VideoOperationStep]
+
+
+class VideoWorkflowExecutionResponse(BaseModel):
+    workflows: List[VideoWorkflowStep]
