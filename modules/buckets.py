@@ -48,6 +48,8 @@ async def upload_file(
 def get_url(filename: str, bucketname: str, upload=False):
     # https://stackoverflow.com/questions/65198959/aws-s3-generate-presigned-url-vs-generate-presigned-post-for-uploading-files
     # put_object for upload
+    if not filename:
+        raise ValueError("filename must be a non-empty string for presigned URL")
     client = get_client()
     return client.generate_presigned_url(
         "get_object" if not upload else "put_object",

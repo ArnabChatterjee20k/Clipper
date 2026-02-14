@@ -102,9 +102,9 @@ class Worker:
             progress_callback=update_job_progress,
         )
         for operation in job.action:
-            op_spec = dict(operation)
-            op = op_spec.pop("op")
-            builder = builder.load(op, **op_spec)
+            op = operation.get("op")
+            data = operation.get("data")
+            builder = builder.load(op, data=data)
         result = await builder.export_to_bytes()
         full_filename = get_filename_from_url(job.input)
         filename, extension = full_filename.split(".")

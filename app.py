@@ -60,10 +60,11 @@ def metrics(*args):
 async def upload_file_to_bucket(file: Annotated[UploadFile, File()], db: DBSession):
     # TODO: restrict to image/videos only
     async with db.transaction():
+        name = file.filename or f"upload-{uuid4().hex}"
         file_id = await create(
             db,
             "files",
-            **asdict(FileModel(name=file.filename, bucketname=PRIMARY_BUCKET)),
+            **asdict(FileModel(name=name, bucketname=PRIMARY_BUCKET)),
         )
         out_file = io.BytesIO(await file.read())
         out_file.name = file.filename
@@ -99,10 +100,8 @@ async def edit_video(edit: VideoEditRequest, db: DBSession):
     builder = VideoBuilder(edit.media)
     # validating first then enqueueing
     for operation in edit.operations:
-        builder = builder.load(
-            operation.op, **operation.model_dump(exclude=["op", "media"])
-        )
-    actions = [operation.model_dump() for operation in edit.operations]
+        builder = builder.load(operation.op, data=operation.get_data())
+    actions = [{"op": o.op, "data": o.get_data()} for o in edit.operations]
     await Worker.enqueue(
         db,
         Job(

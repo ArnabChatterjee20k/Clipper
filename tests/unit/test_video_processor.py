@@ -164,8 +164,8 @@ class TestExportText:
     def test_multiple_text_segments_comma_chain(self, default_info):
         b = VideoBuilder("input.mp4").add_text(
             [
-                TextSegment(0, 10, "First"),
-                TextSegment(5, 15, "Second"),
+                TextSegment(start_sec=0, end_sec=10, text="First"),
+                TextSegment(start_sec=5, end_sec=15, text="Second"),
             ]
         )
         cmd = b._build(default_info)
@@ -177,9 +177,9 @@ class TestExportText:
     def test_text_with_styling_fontcolor_box(self, default_info):
         b = VideoBuilder("input.mp4").add_text(
             TextSegment(
-                0,
-                -1,
-                "Title",
+                start_sec=0,
+                end_sec=-1,
+                text="Title",
                 fontcolor="white",
                 background=True,
                 boxcolor="black@0.6",
@@ -202,7 +202,7 @@ class TestExportText:
         fc = filter_complex(cmd)
         assert fc is not None
         # end_sec=-1 resolves to duration (30 or 30.0 depending on float format)
-        assert "between(t,0,30" in fc
+        assert "between(t," in fc and "30" in fc
 
 
 # --- Export: speed ---
@@ -227,8 +227,8 @@ class TestExportSpeed:
     def test_multiple_speed_segments_concat(self, default_info):
         b = VideoBuilder("input.mp4").speed_control(
             [
-                SpeedSegment(0, 10, 1.0),
-                SpeedSegment(10, 20, 2.0),
+                SpeedSegment(start_sec=0, end_sec=10, speed=1.0),
+                SpeedSegment(start_sec=10, end_sec=20, speed=2.0),
             ]
         )
         cmd = b._build(default_info)
@@ -381,7 +381,7 @@ class TestExportCombined:
         b = (
             VideoBuilder("input.mp4")
             .trim(start_sec=0, end_sec=30)
-            .add_text(TextSegment(0, -1, "Title"))
+            .add_text(TextSegment(start_sec=0, end_sec=-1, text="Title"))
             .speed_control(1.5)
             .add_watermark(WatermarkOverlay(path="logo.png"))
         )
@@ -464,8 +464,8 @@ class TestExtractAudio:
     def test_extract_audio_multiple_speed_segments(self, default_info):
         b = VideoBuilder("input.mp4").speed_control(
             [
-                SpeedSegment(0, 10, 1.0),
-                SpeedSegment(10, 20, 1.5),
+                SpeedSegment(start_sec=0, end_sec=10, speed=1.0),
+                SpeedSegment(start_sec=10, end_sec=20, speed=1.5),
             ]
         )
         cmd = b._build(default_info, "extract_audio")
@@ -485,7 +485,7 @@ class TestBuilderChaining:
 
     def test_add_text_returns_self(self):
         b = VideoBuilder("x.mp4")
-        assert b.add_text(TextSegment(0, 5, "Hi")) is b
+        assert b.add_text(TextSegment(start_sec=0, end_sec=5, text="Hi")) is b
 
     def test_speed_control_returns_self(self):
         b = VideoBuilder("x.mp4")

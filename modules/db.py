@@ -146,8 +146,13 @@ async def read(
     return await db.fetch(sql, *where_values)
 
 
-async def delete(db: asyncpg.Connection, table: TABLE, **records):
-    pass
+async def delete(db: asyncpg.Connection, table: TABLE, **filters) -> None:
+    """Delete rows matching the given filters (e.g. uid=..., id=...)."""
+    if not filters:
+        return
+    parts = [f"{k}=${i+1}" for i, k in enumerate(filters)]
+    sql = f"DELETE FROM {table} WHERE " + " AND ".join(parts)
+    await db.execute(sql, *filters.values())
 
 
 def get_placeholder(size: int, start=0) -> str:

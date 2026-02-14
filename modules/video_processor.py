@@ -2,7 +2,7 @@
 import json, subprocess, re
 import asyncio
 from datetime import datetime
-from typing import Optional, Protocol, AsyncGenerator, Any, Union
+from typing import Optional, Protocol, AsyncGenerator, Any, Union, Type
 from dataclasses import dataclass
 from pydantic import BaseModel
 from .logger import logger
@@ -194,6 +194,15 @@ class TranscodeOptions(BaseModel):
     scale: Optional[str] = None  # e.g. "1280:-1" -> -vf scale=...
 
 
+@dataclass
+class OperationSpec:
+    """Declarative spec for a builder operation. Every op uses a single 'data' key."""
+
+    method: str
+    model: Optional[Type[BaseModel]] = None
+    many: bool = False
+
+
 async def get_progress(
     total_duration: int, line: str, progress_callback: ProgressCallaback
 ):
@@ -364,6 +373,39 @@ def _resolve_end_sec(end_sec: float, duration: float) -> float:
 class VideoBuilder:
     """Filter-based builder: collect watermark, text, speed, audio overlays and export in one go."""
 
+    OPERATIONS: dict[str, OperationSpec] = {
+        "trim": OperationSpec("trim"),
+        "compress": OperationSpec("compress"),
+        "concat": OperationSpec("concat_videos"),
+        "extractAudio": OperationSpec("extract_audio"),
+        "text": OperationSpec(
+            method="add_text",
+            model=TextSegment,
+            many=True,
+        ),
+        "speed": OperationSpec(
+            method="speed_control",
+            model=SpeedSegment,
+            many=True,
+        ),
+        "watermark": OperationSpec(
+            method="add_watermark",
+            model=WatermarkOverlay,
+        ),
+        "audio": OperationSpec(
+            method="add_background_audio",
+            model=AudioOverlay,
+        ),
+        "backgroundColor": OperationSpec(
+            method="set_background_color",
+            model=BackgroundColor,
+        ),
+        "transcode": OperationSpec(
+            method="transcode",
+            model=TranscodeOptions,
+        ),
+    }
+
     def __init__(
         self,
         input_path: str,
@@ -460,9 +502,21 @@ class VideoBuilder:
         self._trim_duration = duration
         return self
 
-    def add_watermark(self, overlay: WatermarkOverlay) -> "VideoBuilder":
-        """Add watermark overlay."""
-        self._watermark = overlay
+    def add_watermark(
+        self,
+        overlay: Optional[WatermarkOverlay] = None,
+        *,
+        path: Optional[str] = None,
+        position: WatermarkPosition = WatermarkPosition.SAFE_BOTTOM,
+        opacity: float = 0.7,
+    ) -> "VideoBuilder":
+        """Add watermark overlay. Pass overlay or (path with optional position, opacity)."""
+        if overlay is not None:
+            self._watermark = overlay
+        elif path is not None:
+            self._watermark = WatermarkOverlay(
+                path=path, position=position, opacity=opacity
+            )
         return self
 
     def add_text(
@@ -482,7 +536,9 @@ class VideoBuilder:
     ) -> "VideoBuilder":
         """Add one or more speed segments, or a single global speed (float)."""
         if isinstance(segment, (int, float)):
-            self._speed_segments.append(SpeedSegment(0, -1, float(segment)))
+            self._speed_segments.append(
+                SpeedSegment(start_sec=0, end_sec=-1, speed=float(segment))
+            )
         elif isinstance(segment, list):
             self._speed_segments.extend(segment)
         else:
@@ -491,12 +547,13 @@ class VideoBuilder:
 
     def add_background_audio(
         self,
+        overlay: Optional[AudioOverlay] = None,
+        *,
         path: Optional[str] = None,
         mix_volume: float = 1.0,
         loop: bool = False,
-        overlay: Optional[AudioOverlay] = None,
     ) -> "VideoBuilder":
-        """Add background/mix-in audio."""
+        """Add background/mix-in audio. Pass AudioOverlay as first arg (from load) or use path/mix_volume/loop."""
         if overlay is not None:
             self._background_audio = overlay
         elif path is not None:
@@ -505,9 +562,18 @@ class VideoBuilder:
             )
         return self
 
-    def set_background_color(self, overlay: BackgroundColor) -> "VideoBuilder":
-        """Set solid background color. only_color=True gives a full black (or colored) screen only."""
-        self._background_color = overlay
+    def set_background_color(
+        self,
+        overlay: Optional[BackgroundColor] = None,
+        *,
+        color: str = "black",
+        only_color: bool = False,
+    ) -> "VideoBuilder":
+        """Set solid background color. Pass overlay or (color with optional only_color). only_color=True gives a full black (or colored) screen only."""
+        if overlay is not None:
+            self._background_color = overlay
+        else:
+            self._background_color = BackgroundColor(color=color, only_color=only_color)
         return self
 
     def transcode(
@@ -966,6 +1032,7 @@ class VideoBuilder:
     async def concat_videos_to_bytes(
         input_paths: list[str],
         video_format: VideoFormat = VideoFormat.MP4,
+        chunk_size: int = 8192,
         complete_callback: Optional[OnCompleteCallback] = None,
         progress_callback: Optional[ProgressCallaback] = None,
     ) -> bytes:
@@ -974,72 +1041,39 @@ class VideoBuilder:
         async for chunk in VideoBuilder.concat_videos(
             input_paths,
             video_format=video_format,
+            chunk_size=chunk_size,
             complete_callback=complete_callback,
             progress_callback=progress_callback,
         ):
             result.extend(chunk)
         return bytes(result)
 
-    def load(self, op: str, **kwargs):
-        """To create builder operations from json"""
-        # service -> builder method
-        schema = {
-            "trim": "trim",
-            "watermark": "add_watermark",
-            "text": "add_text",
-            "speed": "speed_control",
-            # we should be able to control audio as well along adding
-            "audio": "add_background_audio",
-            "backgroundColor": "set_background_color",
-            "transcode": "transcode",
-            "compress": "compress",
-            "concat": "concat_videos",
-            "extractAudio": "extract_audio",
-        }
-
-        if op not in schema:
+    def load(self, op: str, data: Any = None, **kwargs):
+        """Apply one operation from standardized JSON: {"op": "...", "data": {...}} or data: [...]. No if/else."""
+        spec = self.OPERATIONS.get(op)
+        if not spec:
             raise ValueError(f"{op} is an unknown operation")
 
-        method_name = schema[op]
+        if not hasattr(self, spec.method):
+            raise ValueError(f"No processor method found for {op}")
 
-        if not hasattr(self, method_name):
-            raise ValueError(f"No processor method found for {op} operation")
+        if spec.model:
+            if data is None:
+                raise ValueError(f"{op} requires 'data' field")
 
-        # Normalize payload: from JSON these are dicts; convert to models where needed
-        if op == "text":
-            raw = kwargs.get("segment")
-            if raw is not None:
-                segments = raw if isinstance(raw, list) else [raw]
-                kwargs["segment"] = [
-                    TextSegment.model_validate(s) if isinstance(s, dict) else s
-                    for s in segments
+            if spec.many:
+                items = data if isinstance(data, list) else [data]
+                data = [
+                    spec.model.model_validate(item) if isinstance(item, dict) else item
+                    for item in items
                 ]
-        elif op == "speed":
-            raw = kwargs.get("segment")
-            if raw is not None:
-                segments = raw if isinstance(raw, list) else [raw]
-                kwargs["segment"] = [
-                    SpeedSegment.model_validate(s) if isinstance(s, dict) else s
-                    for s in segments
-                ]
-        elif op == "watermark":
-            overlay = kwargs.get("overlay", kwargs)
-            if isinstance(overlay, dict):
-                kwargs = {"overlay": WatermarkOverlay.model_validate(overlay)}
-        elif op == "backgroundColor":
-            overlay = kwargs.get("overlay", kwargs)
-            if isinstance(overlay, dict):
-                kwargs = {"overlay": BackgroundColor.model_validate(overlay)}
-        elif op == "audio":
-            overlay = kwargs.get("overlay")
-            if isinstance(overlay, dict):
-                kwargs = {**kwargs, "overlay": AudioOverlay.model_validate(overlay)}
-        elif op == "transcode":
-            options = kwargs.get("options")
-            if isinstance(options, dict):
-                kwargs = {**kwargs, "options": TranscodeOptions.model_validate(options)}
+            else:
+                if isinstance(data, dict):
+                    data = spec.model.model_validate(data)
 
-        method = getattr(self, method_name)
-        builder = method(**kwargs)
+            return getattr(self, spec.method)(data)
 
-        return builder
+        # No model → passthrough data dict as kwargs
+        passthrough = dict(data) if isinstance(data, dict) else {}
+        passthrough.update(kwargs)
+        return getattr(self, spec.method)(**passthrough)
