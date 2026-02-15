@@ -70,7 +70,9 @@ concat -> one input from the builder() and others from method
 yt downloader
 option for converting the output type as well in video
 
-* workflows -> get as json
+* workflows -> get as json, check the execution for each runs
+
+* finish -> envs and dockerization of the app , minio spelling
 
 ### Issue with mp4
 We can't stream mp4 (can't use pipe:1) as a result we need to get the video first
