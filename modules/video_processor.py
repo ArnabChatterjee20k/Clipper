@@ -635,17 +635,26 @@ class VideoBuilder:
         target_size_mb: Optional[float] = None,
         scale: Optional[str] = None,
         preset: str = "medium",
+        codec: Optional[str] = None,
+        crf: Optional[int] = None,
+        audio_codec: Optional[str] = None,
+        audio_bitrate: Optional[str] = None,
+        movflags: Optional[str] = None,
+        **kwargs: Any,
     ) -> "VideoBuilder":
-        """Compress video with optional target size (MB) and scale. Uses libx264, aac 128k."""
-        self._transcode = TranscodeOptions(
-            codec="libx264",
-            preset=preset,
-            crf=23,
-            audio_codec="aac",
-            audio_bitrate="128k",
-            target_size_mb=target_size_mb,
-            scale=scale,
-        )
+        """Compress video with optional target size (MB) and scale. Optional transcode overrides (codec, crf, audio_codec, audio_bitrate, movflags)."""
+        opts: dict[str, Any] = {
+            "codec": codec or "libx264",
+            "preset": preset,
+            "crf": 23 if crf is None else crf,
+            "audio_codec": audio_codec or "aac",
+            "audio_bitrate": audio_bitrate or "128k",
+            "target_size_mb": target_size_mb,
+            "scale": scale,
+            "movflags": movflags,
+        }
+        opts.update(kwargs)
+        self._transcode = TranscodeOptions(**{k: v for k, v in opts.items() if v is not None})
         return self
 
     def create_gif(self, options: GifOptions) -> "VideoBuilder":

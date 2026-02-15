@@ -59,15 +59,18 @@ Using simple polling
 For notfication on completion to the suer using listen/notify
 
 # TODO
-* User will be able to create their workflows and save them in the yaml file or in the db with the steps mentioned
-* Batch processing (“Resize all images to 1080px, add logo bottom-right, export as WebP”)
-* Auto crop (perfect headshot)
-* Subtitles 
-* Video downloader + audio extractor
-* Auto positioning of texts on an image
-* Finding a youtube video -> trimming it -> add a text or add an audio(insta like sticker on top) -> compress post
-Same for other videos as well
-* HTML Page to save presets and profiles in an editing sessions and saving to dbs
+* ui -> status monitoring in the edits window
+delete workflows, workflow executions tab in the workflow
+
+* image apis -> crop , resize, add text overlay, format, headshot
+
+* video
+best frames extractor
+concat -> one input from the builder() and others from method
+yt downloader
+option for converting the output type as well in video
+
+* workflows -> get as json
 
 ### Issue with mp4
 We can't stream mp4 (can't use pipe:1) as a result we need to get the video first

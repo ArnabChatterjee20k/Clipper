@@ -17,6 +17,16 @@ import type {
   GifOp,
 } from "@/types/edit-session";
 import { WATERMARK_POSITIONS } from "@/types/edit-session";
+import {
+  TEXT_POSITIONS,
+  TEXT_POSITION_LABELS,
+  CUSTOM_POSITION_KEY,
+} from "@/config/text-positions";
+import {
+  SOCIAL_MEDIA_RATIOS,
+  SOCIAL_MEDIA_SCALE_LABELS,
+  CUSTOM_SCALE_KEY,
+} from "@/config/social-media-ratios";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,16 +208,117 @@ function TextEditor({ op, onChange }: { op: TextOp; onChange: (op: TextOp) => vo
               />
             </div>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Font size</Label>
-            <Input
-              type="number"
-              min={8}
-              max={120}
-              value={seg.fontsize ?? 24}
-              onChange={(e) => updateSeg(index, { fontsize: Number(e.target.value) || 24 })}
-              className="h-8"
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Font size</Label>
+              <Input
+                type="number"
+                min={8}
+                max={120}
+                value={seg.fontsize ?? 24}
+                onChange={(e) => updateSeg(index, { fontsize: Number(e.target.value) || 24 })}
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Position</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                value={
+                  (Object.entries(TEXT_POSITIONS).find(
+                    ([_, p]) => p.x === (seg.x ?? "10") && p.y === (seg.y ?? "10")
+                  )?.[0]) ?? CUSTOM_POSITION_KEY
+                }
+                onChange={(e) => {
+                  const key = e.target.value;
+                  if (key === CUSTOM_POSITION_KEY) return;
+                  const pos = TEXT_POSITIONS[key];
+                  if (pos) updateSeg(index, { x: pos.x, y: pos.y });
+                }}
+              >
+                <option value={CUSTOM_POSITION_KEY}>Custom</option>
+                {Object.keys(TEXT_POSITIONS).map((key) => (
+                  <option key={key} value={key}>
+                    {TEXT_POSITION_LABELS[key] ?? key}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">X</Label>
+              <Input
+                value={seg.x ?? "10"}
+                onChange={(e) => updateSeg(index, { x: e.target.value || "10" })}
+                placeholder="10 or expression"
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Y</Label>
+              <Input
+                value={seg.y ?? "10"}
+                onChange={(e) => updateSeg(index, { y: e.target.value || "10" })}
+                placeholder="10 or expression"
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Font file (path)</Label>
+              <Input
+                value={seg.fontfile ?? ""}
+                onChange={(e) => updateSeg(index, { fontfile: e.target.value || undefined })}
+                placeholder="optional"
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Font color</Label>
+              <Input
+                value={seg.fontcolor ?? ""}
+                onChange={(e) => updateSeg(index, { fontcolor: e.target.value || undefined })}
+                placeholder="e.g. white or 0xffffff"
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Box color</Label>
+              <Input
+                value={seg.boxcolor ?? ""}
+                onChange={(e) => updateSeg(index, { boxcolor: e.target.value || undefined })}
+                placeholder="optional"
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Box border width</Label>
+              <Input
+                type="number"
+                min={0}
+                value={seg.boxborderw ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  updateSeg(index, { boxborderw: v === "" ? undefined : Number(v) });
+                }}
+                placeholder="optional"
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id={`text-bg-${index}`}
+              checked={seg.background ?? false}
+              onChange={(e) => updateSeg(index, { background: e.target.checked })}
+              className="rounded border-input"
             />
+            <Label htmlFor={`text-bg-${index}`} className="text-xs">Draw box behind text</Label>
           </div>
         </div>
       ))}
@@ -408,22 +519,90 @@ function BackgroundColorEditor({ op, onChange }: { op: BackgroundColorOp; onChan
 
 function TranscodeEditor({ op, onChange }: { op: TranscodeOp; onChange: (op: TranscodeOp) => void }) {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      <div className="space-y-1">
-        <Label className="text-xs">Video codec</Label>
-        <Input value={op.codec ?? "libx264"} onChange={(e) => onChange({ ...op, codec: e.target.value })} className="h-8" />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Preset</Label>
-        <Input value={op.preset ?? "medium"} onChange={(e) => onChange({ ...op, preset: e.target.value })} className="h-8" />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">CRF</Label>
-        <Input type="number" min={0} max={51} value={op.crf ?? 23} onChange={(e) => onChange({ ...op, crf: Number(e.target.value) || 23 })} className="h-8" />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Audio codec</Label>
-        <Input value={op.audio_codec ?? "aac"} onChange={(e) => onChange({ ...op, audio_codec: e.target.value })} className="h-8" />
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Video codec</Label>
+          <Input value={op.codec ?? "libx264"} onChange={(e) => onChange({ ...op, codec: e.target.value })} className="h-8" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Preset</Label>
+          <Input value={op.preset ?? "medium"} onChange={(e) => onChange({ ...op, preset: e.target.value })} className="h-8" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">CRF</Label>
+          <Input type="number" min={0} max={51} value={op.crf ?? 23} onChange={(e) => onChange({ ...op, crf: Number(e.target.value) || 23 })} className="h-8" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Audio codec</Label>
+          <Input value={op.audio_codec ?? "aac"} onChange={(e) => onChange({ ...op, audio_codec: e.target.value })} className="h-8" />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Audio bitrate</Label>
+          <Input
+            value={op.audio_bitrate ?? ""}
+            onChange={(e) => onChange({ ...op, audio_bitrate: e.target.value || undefined })}
+            placeholder="e.g. 128k"
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Movflags</Label>
+          <Input
+            value={op.movflags ?? ""}
+            onChange={(e) => onChange({ ...op, movflags: e.target.value || undefined })}
+            placeholder="e.g. +faststart"
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Target size (MB)</Label>
+          <Input
+            type="number"
+            min={0}
+            step={0.5}
+            value={op.target_size_mb ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              onChange({ ...op, target_size_mb: v === "" ? undefined : Number(v) });
+            }}
+            placeholder="optional"
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Scale preset</Label>
+          <select
+            className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+            value={
+              Object.entries(SOCIAL_MEDIA_RATIOS).find(
+                ([_, r]) => r.scale === (op.scale ?? "")
+              )?.[0] ?? CUSTOM_SCALE_KEY
+            }
+            onChange={(e) => {
+              const key = e.target.value;
+              if (key === CUSTOM_SCALE_KEY) return;
+              const ratio = SOCIAL_MEDIA_RATIOS[key];
+              if (ratio) onChange({ ...op, scale: ratio.scale });
+            }}
+          >
+            <option value={CUSTOM_SCALE_KEY}>Custom</option>
+            {Object.keys(SOCIAL_MEDIA_RATIOS).map((key) => (
+              <option key={key} value={key}>
+                {SOCIAL_MEDIA_SCALE_LABELS[key] ?? key}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Scale</Label>
+          <Input
+            value={op.scale ?? ""}
+            onChange={(e) => onChange({ ...op, scale: e.target.value || undefined })}
+            placeholder="e.g. 1280:-1 or use preset"
+            className="h-8"
+          />
+        </div>
       </div>
     </div>
   );
@@ -449,18 +628,42 @@ function CompressEditor({ op, onChange }: { op: CompressOp; onChange: (op: Compr
           />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Scale (e.g. 1280:-1)</Label>
+          <Label className="text-xs">Scale preset</Label>
+          <select
+            className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+            value={
+              Object.entries(SOCIAL_MEDIA_RATIOS).find(
+                ([_, r]) => r.scale === (op.scale ?? "")
+              )?.[0] ?? CUSTOM_SCALE_KEY
+            }
+            onChange={(e) => {
+              const key = e.target.value;
+              if (key === CUSTOM_SCALE_KEY) return;
+              const ratio = SOCIAL_MEDIA_RATIOS[key];
+              if (ratio) onChange({ ...op, scale: ratio.scale });
+            }}
+          >
+            <option value={CUSTOM_SCALE_KEY}>Custom</option>
+            {Object.keys(SOCIAL_MEDIA_RATIOS).map((key) => (
+              <option key={key} value={key}>
+                {SOCIAL_MEDIA_SCALE_LABELS[key] ?? key}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Scale</Label>
           <Input
             value={op.scale ?? ""}
             onChange={(e) => onChange({ ...op, scale: e.target.value || undefined })}
-            placeholder="optional"
+            placeholder="e.g. 1280:-1 or use preset"
             className="h-8"
           />
         </div>
-      </div>
-      <div className="space-y-1">
-        <Label className="text-xs">Preset</Label>
-        <Input value={op.preset ?? "medium"} onChange={(e) => onChange({ ...op, preset: e.target.value })} className="h-8" />
+        <div className="space-y-1">
+          <Label className="text-xs">Preset</Label>
+          <Input value={op.preset ?? "medium"} onChange={(e) => onChange({ ...op, preset: e.target.value })} className="h-8" />
+        </div>
       </div>
     </div>
   );

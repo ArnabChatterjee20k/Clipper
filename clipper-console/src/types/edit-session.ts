@@ -19,6 +19,11 @@ export interface TextSegment {
   fontsize?: number;
   x?: string;
   y?: string;
+  fontfile?: string | null;
+  fontcolor?: string | null;
+  boxcolor?: string | null;
+  boxborderw?: number | null;
+  background?: boolean | null;
 }
 
 export interface TextOp {
@@ -76,14 +81,17 @@ export interface BackgroundColorOp {
   overlay: BackgroundColorOverlay;
 }
 
-/** Transcode options */
+/** Transcode options (matches backend TranscodeOptions) */
 export interface TranscodeOp {
   op: "transcode";
   codec?: string;
   preset?: string;
   crf?: number;
   audio_codec?: string;
+  audio_bitrate?: string | null;
   movflags?: string | null;
+  target_size_mb?: number | null;
+  scale?: string | null;
   options?: Record<string, unknown>;
 }
 
