@@ -209,9 +209,11 @@ async def update(
     offset = len(set_values)
     where_parts = [f"{k}=${i+1+offset}" for i, k in enumerate(filters)]
     sql = (
-        f"UPDATE {table} SET " + ", ".join(set_parts) +
-        " WHERE " + " AND ".join(where_parts) +
-        " RETURNING *"
+        f"UPDATE {table} SET "
+        + ", ".join(set_parts)
+        + " WHERE "
+        + " AND ".join(where_parts)
+        + " RETURNING *"
     )
     values = list(set_values.values()) + list(filters.values())
     return await db.fetch(sql, *values)

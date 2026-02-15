@@ -35,6 +35,7 @@ class Worker:
         self._wait = wait_time_seconds
         self._running = False
         self._id = id
+        self._current_job_id = None
 
     async def _get_db(self) -> asyncpg.Connection:
         # TODO: should be a connection pool
@@ -55,6 +56,7 @@ class Worker:
                 if not job:
                     await asyncio.sleep(self._wait)
                     continue
+                self._current_job_id = job.id
                 job_status_total.labels(status=JobStatus.PROCESSING.value).inc()
                 worker_jobs_picked_total.labels(worker_id=self._id).inc()
                 job_queue_depth.labels(status=JobStatus.PROCESSING.value).inc()
@@ -79,6 +81,7 @@ class Worker:
                         )
                 await asyncio.sleep(self._wait)
             finally:
+                self._current_job_id = None
                 job_queue_depth.labels(status=JobStatus.PROCESSING.value).dec()
 
     async def _process_job(self, job: Job):
@@ -332,3 +335,12 @@ class WorkerPool:
         for worker, workerTask in self._workers:
             workerTask.cancel()
             await worker.stop()
+
+    async def cancel(self, job_id: str):
+        # pgnotify can be used as well here which in turn can be used to run this in a distributed env
+        for worker, workerTask in self._workers:
+            if worker._current_job_id == job_id:
+                logger.warning(f"{worker._id} is having the job")
+                cancelled = workerTask.cancel()
+                if not cancelled:
+                    raise ValueError(f"Not able to cancel the job {job_id}")

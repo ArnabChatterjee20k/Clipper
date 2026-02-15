@@ -654,7 +654,9 @@ class VideoBuilder:
             "movflags": movflags,
         }
         opts.update(kwargs)
-        self._transcode = TranscodeOptions(**{k: v for k, v in opts.items() if v is not None})
+        self._transcode = TranscodeOptions(
+            **{k: v for k, v in opts.items() if v is not None}
+        )
         return self
 
     def create_gif(self, options: GifOptions) -> "VideoBuilder":
