@@ -1,5 +1,6 @@
-import io, asyncio
-from uuid import uuid4
+import io, asyncio, json
+from datetime import datetime
+from uuid import uuid4, UUID
 from typing import Annotated, Optional
 from fastapi import FastAPI, File, UploadFile, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +18,7 @@ from modules.db import (
     load_schemas,
     create,
     read,
+    update as db_update,
     delete as db_delete,
     File as FileModel,
 )
@@ -29,8 +31,18 @@ from modules.responses import (
     VideoEditResponse,
     VideoWorkflowStep,
     VideoWorkflowExecutionResponse,
+    EditListResponse,
+    WorkflowResponse,
+    WorkflowListResponse,
+    WorkflowRetryResponse,
 )
-from modules.requests import VideoEditRequest, VideoWorkflowCreateRequest
+from modules.requests import (
+    VideoEditRequest,
+    VideoWorkflowCreateRequest,
+    EditUpdateRequest,
+    WorkflowUpdateRequest,
+    WorkflowRetryRequest,
+)
 from modules.metrics import registry
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from consumers import ConsumerManager
@@ -120,12 +132,13 @@ async def delete_file_from_bucket(file_id: int, db: DBSession):
         raise HTTPException(status_code=404, detail="File not found")
     name = row.get("name")
     bucketname = row.get("bucketname") or PRIMARY_BUCKET
-    try:
-        await s3_delete_file(name, bucketname)
-    except Exception:
-        pass  # object may already be missing
     async with db.transaction():
-        await db_delete(db, "files", id=file_id)
+        try:
+            # lets try to delete from db first as if s3 upload issue then db will be automatically rolledback
+            await db_delete(db, "files", id=file_id)
+            await s3_delete_file(name, bucketname)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Error occured while deleting the file")
     return Response(status_code=204)
 
 
@@ -148,6 +161,17 @@ async def edit_video(edit: VideoEditRequest, db: DBSession):
     )
     return VideoEditResponse(id=str(uid), operations=edit.operations, media=edit.media)
 
+def _job_row_to_kwargs(row) -> dict:
+    """Convert a DB row to kwargs for Job, parsing jsonb fields if they come back as strings."""
+    d = dict(row)
+    for key in ("output", "action"):
+        if isinstance(d.get(key), str):
+            try:
+                d[key] = json.loads(d[key])
+            except (ValueError, TypeError):
+                pass
+    return d
+
 
 @app.get("/edits/status")
 async def stream_jobs(uid: str, db: DBSession):
@@ -164,7 +188,7 @@ async def stream_jobs(uid: str, db: DBSession):
 
         while True:
             jobs = await read(db, "jobs", filters={"uid": uid_val}, limit=1)
-            jobs = [Job(**job) for job in jobs]
+            jobs = [Job(**_job_row_to_kwargs(job)) for job in jobs]
             for job in jobs:
                 jid = job.id
                 version = job.updated_at
@@ -186,6 +210,112 @@ async def stream_jobs(uid: str, db: DBSession):
     )
 
 
+@app.get("/edits")
+async def list_edits(
+    db: DBSession,
+    uid: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+    last_id: int = 0,
+):
+    filters = {}
+    if uid is not None:
+        try:
+            filters["uid"] = UUID(uid)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid uid")
+    if status is not None:
+        filters["status"] = status
+    rows = await read(db, "jobs", filters, "AND", limit=limit, last_id=last_id)
+    result = [Job(**_job_row_to_kwargs(r)).model_dump(mode="json") for r in rows]
+    return EditListResponse(edits=result, total=len(result))
+
+
+@app.get("/edits/{edit_id}")
+async def get_edit(edit_id: int, db: DBSession):
+    rows = await read(db, "jobs", {"id": edit_id}, "AND", limit=1, last_id=0)
+    if not rows:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    return Job(**_job_row_to_kwargs(rows[0])).model_dump(mode="json")
+
+
+@app.patch("/edits/{edit_id}")
+async def update_edit(edit_id: int, body: EditUpdateRequest, db: DBSession):
+    row = await db.fetchrow("SELECT id FROM jobs WHERE id = $1", edit_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    set_values = body.model_dump(exclude_unset=True)
+    if not set_values:
+        row = await db.fetchrow("SELECT * FROM jobs WHERE id = $1", edit_id)
+        return Job(**_job_row_to_kwargs(row)).model_dump(mode="json")
+    updated = await db_update(db, "jobs", set_values, id=edit_id)
+    return Job(**_job_row_to_kwargs(updated[0])).model_dump(mode="json")
+
+
+@app.post("/edits/{edit_id}/retry")
+async def retry_edit(edit_id: int, db: DBSession):
+    row = await db.fetchrow("SELECT * FROM jobs WHERE id = $1", edit_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    current_status = row.get("status")
+    if current_status not in (JobStatus.ERROR.value, JobStatus.CANCELLED.value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only retry edits with status error or cancelled, got {current_status}",
+        )
+    updated = await db_update(
+        db,
+        "jobs",
+        {"status": JobStatus.QUEUED.value, "error": None, "retries": 0},
+        id=edit_id,
+    )
+    return Job(**_job_row_to_kwargs(updated[0])).model_dump(mode="json")
+
+
+@app.post("/edits/{edit_id}/cancel")
+async def cancel_edit(edit_id: int, db: DBSession):
+    # TODO: need to stop the worker if it is processing
+    row = await db.fetchrow("SELECT id FROM jobs WHERE id = $1", edit_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Edit not found")
+    updated = await db_update(
+        db, "jobs", {"status": JobStatus.CANCELLED.value}, id=edit_id
+    )
+    return Job(**_job_row_to_kwargs(updated[0])).model_dump(mode="json")
+
+
+def _workflow_row_to_response(row) -> WorkflowResponse:
+    return WorkflowResponse(
+        id=row.get("id"),
+        name=row.get("name"),
+        search=row.get("search"),
+        steps=row.get("steps"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
+@app.get("/workflows")
+async def list_workflows(
+    db: DBSession,
+    limit: int = 20,
+    last_id: int = 0,
+):
+    rows = await read(db, "workflows", {}, "AND", limit=limit, last_id=last_id)
+    result = [_workflow_row_to_response(r) for r in rows]
+    return WorkflowListResponse(workflows=result, total=len(result))
+
+
+@app.get("/workflows/{workflow_id}")
+async def get_workflow(workflow_id: int, db: DBSession):
+    rows = await read(
+        db, "workflows", {"id": workflow_id}, "AND", limit=1, last_id=0
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return _workflow_row_to_response(rows[0])
+
+
 @app.post("/workflows", response_model=VideoWorkflowCreateRequest)
 async def create_workflow(db: DBSession, workflow: VideoWorkflowCreateRequest):
     for step in workflow.steps:
@@ -199,6 +329,64 @@ async def create_workflow(db: DBSession, workflow: VideoWorkflowCreateRequest):
     return workflow
 
 
+@app.patch("/workflows/{workflow_id}")
+async def update_workflow(
+    workflow_id: int, body: WorkflowUpdateRequest, db: DBSession
+):
+    row = await db.fetchrow(
+        "SELECT id FROM workflows WHERE id = $1", workflow_id
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    set_values = body.model_dump(exclude_unset=True)
+    if not set_values:
+        row = await db.fetchrow("SELECT * FROM workflows WHERE id = $1", workflow_id)
+        return _workflow_row_to_response(row)
+    set_values["updated_at"] = datetime.utcnow()
+    if "steps" in set_values and set_values["steps"] is not None:
+        for step in set_values["steps"]:
+            builder = VideoBuilder("")
+            for op_dict in step:
+                op = op_dict.get("op")
+                data = {k: v for k, v in op_dict.items() if k != "op"}
+                builder = builder.load(op, data=data)
+    updated = await db_update(db, "workflows", set_values, id=workflow_id)
+    return _workflow_row_to_response(updated[0])
+
+
+@app.post("/workflows/{workflow_id}/retry")
+async def retry_workflow(
+    workflow_id: int, body: WorkflowRetryRequest, db: DBSession
+):
+    try:
+        uid_val = UUID(body.uid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid uid")
+    row = await db.fetchrow(
+        "SELECT id FROM workflows WHERE id = $1", workflow_id
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    rows = await db.fetch(
+        """
+        UPDATE jobs
+        SET status = $1, error = NULL, retries = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE uid = $2 AND status IN ($3, $4)
+        RETURNING *
+        """,
+        JobStatus.QUEUED.value,
+        uid_val,
+        JobStatus.ERROR.value,
+        JobStatus.CANCELLED.value,
+    )
+    return WorkflowRetryResponse(
+        uid=body.uid,
+        workflow_id=workflow_id,
+        requeued=len(rows),
+        jobs=[Job(**_job_row_to_kwargs(r)).model_dump(mode="json") for r in rows],
+    )
+
+
 @app.post("/workflows/execute")
 async def execute_workflow(
     db: DBSession,
@@ -207,9 +395,6 @@ async def execute_workflow(
     name: Optional[str] = None,
     search: Optional[str] = None,
 ):
-    # TODO: add operational step for the concat videos and dag in worker to use output from first step in current step as input
-    # also alter the database
-    # the workflow will be coming from the database
     if not any((id, name, search)):
         return HTTPException(
             403, "Any of id, name or search should be give for executing workflows"
@@ -223,7 +408,7 @@ async def execute_workflow(
         # should be done with like operator
         filters['search'] = search
 
-    workflow = await read(db, "workflows", filters)
+    workflow = await read(db, "workflows", filters, condition='OR')
     if not workflow:
         return HTTPException(404, "No workflows found")
     workflow = workflow[0]

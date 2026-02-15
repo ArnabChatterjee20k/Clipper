@@ -128,6 +128,17 @@ async def load_schemas():
                 )
             """)
         logger.info("workflows table created")
+        logger.info("creating workflow_executions table")
+        await db.execute(f"""
+                CREATE TABLE IF NOT EXISTS workflow_executions(
+                    id serial PRIMARY KEY,
+                    workflow_id INTEGER NOT NULL,
+                    progress smallint DEFAULT 0,
+                    created_at timestamp NOT NULL,
+                    updated_at timestamp NOT NULL
+                )
+            """)
+        logger.info("workflow_executions table created")
 
 
 async def create(db: asyncpg.Connection, table: TABLE, **records) -> int:
@@ -169,17 +180,41 @@ async def read(
     limit=1,
     last_id=0,
 ) -> list[asyncpg.Record]:
-    where_columns, where_placeholder, where_values = prepare(filters)
     where_clause_literals = []
-    if where_columns and where_placeholder:
-        where_clause_literals = [
-            f"{col}={placeholder}"
-            for col, placeholder in zip([where_columns], [where_placeholder])
-        ]
-    where_clause_literals.append(f"id > {last_id}")
+    where_values: list = []
+    if filters:
+        where_columns, _, where_vals = prepare(filters)
+        col_list = [c.strip() for c in where_columns.split(",")]
+        for i, col in enumerate(col_list):
+            where_clause_literals.append(f"{col}=${i + 1}")
+            where_values.append(where_vals[i])
+    next_param = len(where_values) + 1
+    where_clause_literals.append(f"id > ${next_param}")
+    where_values.append(last_id)
     where_clause = f" {condition} ".join(where_clause_literals)
     sql = f"SELECT * from {table} WHERE {where_clause} ORDER BY id ASC LIMIT {limit}"
     return await db.fetch(sql, *where_values)
+
+
+async def update(
+    db: asyncpg.Connection,
+    table: TABLE,
+    set_values: dict,
+    **filters,
+) -> list[asyncpg.Record]:
+    """Update rows matching the given filters. set_values is dict of column -> value. Returns updated rows."""
+    if not filters or not set_values:
+        return []
+    set_parts = [f"{k}=${i+1}" for i, k in enumerate(set_values.keys())]
+    offset = len(set_values)
+    where_parts = [f"{k}=${i+1+offset}" for i, k in enumerate(filters)]
+    sql = (
+        f"UPDATE {table} SET " + ", ".join(set_parts) +
+        " WHERE " + " AND ".join(where_parts) +
+        " RETURNING *"
+    )
+    values = list(set_values.values()) + list(filters.values())
+    return await db.fetch(sql, *values)
 
 
 async def delete(db: asyncpg.Connection, table: TABLE, **filters) -> None:

@@ -167,3 +167,19 @@ class VideoWorkflowCreateRequest(BaseModel):
     id: Optional[int] = None
     created_at: datetime = datetime.now()
     updated_at: datetime = datetime.now()
+
+
+class EditUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    progress: Optional[int] = None
+    error: Optional[str] = None
+
+
+class WorkflowUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    search: Optional[str] = None
+    steps: Optional[List[List[dict]]] = None
+
+
+class WorkflowRetryRequest(BaseModel):
+    uid: str
