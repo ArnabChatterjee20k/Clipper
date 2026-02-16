@@ -28,6 +28,7 @@ from .metrics import (
 # TODO: Add dead-jobs(cancellation status), heartbeat(progress update for long running jobs to know its running or not), logging worker health -> also need to check whether the worker is still processing or not
 # holding a lock and processing and then unlock is a good idea?
 # TODO: add a new processor for check completed jobs and moving the output to different bucket and archive the other results
+# Implementing it would require to extract Worker as a base class then have deque as abstract method. ArchivalWorker, DeletionWorker would use Worker as base and we can append in the workers according to the necessity
 class Worker:
     def __init__(self, retries=5, wait_time_seconds=1, id=""):
         self._db = None
@@ -120,9 +121,23 @@ class Worker:
         full_filename = get_filename_from_url(job.input)
         base, _, ext = full_filename.rpartition(".")
         base = base or full_filename
+
+        # Ensure we have a valid base name
+        if not base or base == "":
+            base = "video"
+
+        # Determine extension based on operation or file extension
         if getattr(builder, "_gif_options", None) is not None:
             ext = "gif"
-        ext = ext or "mp4"
+        elif not ext or ext == "":
+            # Default to mp4 if no extension found
+            ext = "mp4"
+
+        # Ensure extension is valid (not something like "watch")
+        valid_extensions = ["mp4", "webm", "mkv", "mp3", "m4a", "gif", "mov", "avi"]
+        if ext.lower() not in valid_extensions:
+            ext = "mp4"
+
         filename = f"{base}_output_{job.uid}_{job.output_version}.{ext}"
         try:
             async with db.transaction():

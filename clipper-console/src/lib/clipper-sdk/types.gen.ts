@@ -956,6 +956,34 @@ export type CreateWorkflowWorkflowsPostResponses = {
 
 export type CreateWorkflowWorkflowsPostResponse = CreateWorkflowWorkflowsPostResponses[keyof CreateWorkflowWorkflowsPostResponses];
 
+export type DeleteWorkflowWorkflowsWorkflowIdDeleteData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow Id
+         */
+        workflow_id: number;
+    };
+    query?: never;
+    url: '/workflows/{workflow_id}';
+};
+
+export type DeleteWorkflowWorkflowsWorkflowIdDeleteErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type DeleteWorkflowWorkflowsWorkflowIdDeleteError = DeleteWorkflowWorkflowsWorkflowIdDeleteErrors[keyof DeleteWorkflowWorkflowsWorkflowIdDeleteErrors];
+
+export type DeleteWorkflowWorkflowsWorkflowIdDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
 export type GetWorkflowWorkflowsWorkflowIdGetData = {
     body?: never;
     path: {
@@ -1006,6 +1034,43 @@ export type UpdateWorkflowWorkflowsWorkflowIdPatchErrors = {
 export type UpdateWorkflowWorkflowsWorkflowIdPatchError = UpdateWorkflowWorkflowsWorkflowIdPatchErrors[keyof UpdateWorkflowWorkflowsWorkflowIdPatchErrors];
 
 export type UpdateWorkflowWorkflowsWorkflowIdPatchResponses = {
+    /**
+     * Successful Response
+     */
+    200: unknown;
+};
+
+export type ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetData = {
+    body?: never;
+    path: {
+        /**
+         * Workflow Id
+         */
+        workflow_id: number;
+    };
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Last Id
+         */
+        last_id?: number;
+    };
+    url: '/workflows/{workflow_id}/executions';
+};
+
+export type ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetError = ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetErrors[keyof ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetErrors];
+
+export type ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetResponses = {
     /**
      * Successful Response
      */

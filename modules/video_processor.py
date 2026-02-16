@@ -1,6 +1,8 @@
 # For easy reference and getting the processor idea check the scripts/ffmpeg.py file
 import json, subprocess, re
 import asyncio
+import os
+import tempfile
 from datetime import datetime
 from typing import Optional, Protocol, AsyncGenerator, Any, Union, Type
 from dataclasses import dataclass
@@ -9,6 +11,9 @@ from .logger import logger
 from datetime import datetime
 from enum import Enum
 from io import BytesIO
+import yt_dlp
+from uuid import uuid4
+from .buckets import upload_file, get_url, PRIMARY_BUCKET
 
 ffprobe = "ffprobe"
 ffmpeg = "ffmpeg"
@@ -216,6 +221,14 @@ class GifOptions(BaseModel):
     fps: int = 10
     scale: int = 480  # width, height auto
     output_codec: str = "gif"
+
+
+class YouTubeDownloadOptions(BaseModel):
+    """Options for downloading video from YouTube. URL and output_path come from VideoBuilder's input_path."""
+
+    quality: Optional[str] = "best"  # e.g., "best", "worst", "720p", "1080p", etc.
+    format: Optional[str] = None  # e.g., "mp4", "webm", etc.
+    audio_only: bool = False  # if True, download only audio
 
 
 @dataclass
@@ -432,6 +445,10 @@ class VideoBuilder:
             method="create_gif",
             model=GifOptions,
         ),
+        "download_from_youtube": OperationSpec(
+            method="download_from_youtube",
+            model=YouTubeDownloadOptions,
+        ),
     }
 
     def __init__(
@@ -460,6 +477,8 @@ class VideoBuilder:
         self._background_color: Optional[BackgroundColor] = None
         self._transcode: Optional[TranscodeOptions] = None
         self._gif_options: Optional[GifOptions] = None
+        self._downloaded_path: Optional[str] = None
+        self._youtube_options: Optional[YouTubeDownloadOptions] = None
 
     @staticmethod
     def get_video_info(input_path: str) -> VideoInfo:
@@ -663,6 +682,232 @@ class VideoBuilder:
         """Set GIF export options. When set, export_to_bytes() produces an animated GIF."""
         self._gif_options = options
         return self
+
+    def download_from_youtube(self, options: YouTubeDownloadOptions) -> "VideoBuilder":
+        """Download video from YouTube using yt-dlp. Updates input_path to the downloaded file."""
+        # Store options for async download during export
+        self._youtube_options = options
+        return self
+
+    async def _download_from_youtube(self) -> str:
+        """Download video from YouTube using yt-dlp Python package. Downloads directly to bucket and returns presigned URL."""
+        if not self._youtube_options:
+            raise RuntimeError("YouTube download options not set")
+
+        # Use input_path as the YouTube URL
+        youtube_url = self.input_path
+        if not youtube_url:
+            raise RuntimeError(
+                "VideoBuilder input_path must be a YouTube URL for download_from_youtube operation"
+            )
+
+        opts = self._youtube_options
+
+        # Create a BytesIO buffer to download into
+        download_buffer = BytesIO()
+        downloaded_filename = [None]  # Use list to modify from nested function
+
+        # Build yt-dlp options
+        ydl_opts = {
+            "quiet": False,
+            "no_warnings": False,
+            "nooverwrites": False,  # Allow overwriting existing files
+            "nopart": True,  # Don't use .part files (prevents issues with incomplete downloads)
+            "writethumbnail": False,  # Don't write thumbnail
+            "writesubtitles": False,  # Don't write subtitles
+            "writeautomaticsub": False,  # Don't write auto subtitles
+            "ignoreerrors": False,  # Don't ignore errors
+        }
+
+        # Set quality/format
+        if opts.audio_only:
+            ydl_opts["format"] = "bestaudio/best"
+            ydl_opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                }
+            ]
+            file_ext = "mp3"
+        elif opts.format:
+            ydl_opts["format"] = (
+                f"bestvideo[ext={opts.format}]+bestaudio[ext={opts.format}]/best[ext={opts.format}]/best"
+            )
+            file_ext = opts.format
+        elif opts.quality and opts.quality != "best":
+            # Handle quality strings like "720p", "1080p", etc.
+            if opts.quality.endswith("p"):
+                height = opts.quality[:-1]
+                ydl_opts["format"] = (
+                    f"bestvideo[height<={height}]+bestaudio/best[height<={height}]"
+                )
+            else:
+                ydl_opts["format"] = opts.quality
+            file_ext = "mp4"  # Default to mp4
+        else:
+            file_ext = "mp4"  # Default to mp4
+
+        # Custom postprocessor to write to buffer
+        def progress_hook(d):
+            if d["status"] == "finished":
+                downloaded_filename[0] = d.get("filename")
+
+        ydl_opts["progress_hooks"] = [progress_hook]
+
+        logger.info(f"Downloading from YouTube: {youtube_url} with options: {ydl_opts}")
+
+        # Download to temporary file first (yt-dlp needs a file path)
+        temp_dir = tempfile.gettempdir()
+        # Create a unique temp file path that yt-dlp can use
+        # Use timestamp + UUID to ensure absolute uniqueness
+        import time
+
+        unique_id = f"{int(time.time() * 1000)}_{uuid4().hex[:8]}"
+        temp_base = os.path.join(
+            temp_dir, f"youtube_download_{os.getpid()}_{unique_id}"
+        )
+        temp_path_template = f"{temp_base}.%(ext)s"
+
+        # Clean up any existing files with this pattern before downloading
+        # Also check for .part files and other yt-dlp artifacts
+        cleanup_extensions = ["mp4", "webm", "mkv", "mp3", "m4a", "part", "ytdl"]
+        for ext in cleanup_extensions:
+            candidate = f"{temp_base}.{ext}"
+            if os.path.exists(candidate):
+                try:
+                    file_size = os.path.getsize(candidate)
+                    os.unlink(candidate)
+                    logger.info(
+                        f"Cleaned up existing temp file: {candidate} ({file_size} bytes)"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to clean up {candidate}: {e}")
+
+        # Also clean up any files matching the pattern (yt-dlp might create files with different extensions)
+        try:
+            import glob
+
+            pattern = f"{temp_base}.*"
+            for existing_file in glob.glob(pattern):
+                try:
+                    if os.path.exists(existing_file):
+                        os.unlink(existing_file)
+                        logger.info(f"Cleaned up existing file: {existing_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up {existing_file}: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to glob cleanup: {e}")
+
+        # Build yt-dlp options with temp file path template
+        ydl_opts["outtmpl"] = temp_path_template
+
+        # Run yt-dlp in a thread to download
+        def download():
+            # Double-check that the file doesn't exist before downloading
+            # Also check for any files matching the pattern and delete if they're 0 bytes
+            import glob
+
+            pattern = f"{temp_base}.*"
+            for existing_file in glob.glob(pattern):
+                try:
+                    if os.path.exists(existing_file):
+                        file_size = os.path.getsize(existing_file)
+                        os.unlink(
+                            existing_file
+                        )  # Always remove to force fresh download
+                        logger.info(
+                            f"Removed existing file before download: {existing_file} ({file_size} bytes)"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to remove {existing_file}: {e}")
+
+            # Verify no files exist before starting download
+            remaining_files = glob.glob(pattern)
+            if remaining_files:
+                logger.warning(f"Files still exist before download: {remaining_files}")
+                for f in remaining_files:
+                    try:
+                        os.unlink(f)
+                    except:
+                        pass
+
+            logger.info(f"Starting yt-dlp download to: {temp_path_template}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([youtube_url])
+                # Find the actual downloaded file (yt-dlp replaces %(ext)s with actual extension)
+                if downloaded_filename[0] and os.path.exists(downloaded_filename[0]):
+                    file_path = downloaded_filename[0]
+                    # Verify file is not empty
+                    if os.path.getsize(file_path) > 0:
+                        return file_path
+                    else:
+                        logger.warning(f"Downloaded file is empty: {file_path}")
+
+                # Try to find file with various extensions
+                for ext in ["mp4", "webm", "mkv", "mp3", "m4a", file_ext]:
+                    candidate = f"{temp_base}.{ext}"
+                    if os.path.exists(candidate):
+                        file_size = os.path.getsize(candidate)
+                        if file_size > 0:
+                            return candidate
+                        else:
+                            logger.warning(f"Found file but it's empty: {candidate}")
+                return None
+
+        downloaded_path = await asyncio.to_thread(download)
+
+        if not downloaded_path or not os.path.exists(downloaded_path):
+            raise RuntimeError(
+                f"Could not determine downloaded file path for YouTube URL: {youtube_url}"
+            )
+
+        file_size = os.path.getsize(downloaded_path)
+        if file_size == 0:
+            raise RuntimeError(f"Downloaded file is empty (0 bytes): {downloaded_path}")
+
+        logger.info(
+            f"Downloaded YouTube video to temp file: {downloaded_path} ({file_size} bytes)"
+        )
+
+        # Read the downloaded file and upload to bucket
+        def read_and_upload():
+            with open(downloaded_path, "rb") as f:
+                file_data = f.read()
+            file_size = len(file_data)
+            logger.info(
+                f"Read {file_size} bytes from downloaded file: {downloaded_path}"
+            )
+            if file_size == 0:
+                raise RuntimeError(f"Downloaded file is empty: {downloaded_path}")
+            # Generate unique filename for bucket
+            filename = f"youtube_{uuid4().hex}_{os.path.basename(downloaded_path)}"
+            buffer = BytesIO(file_data)
+            buffer.name = filename
+            buffer.seek(0)  # Reset buffer position to beginning
+            return buffer, filename, file_size
+
+        buffer, filename, file_size = await asyncio.to_thread(read_and_upload)
+
+        # Ensure buffer position is at the beginning before upload
+        buffer.seek(0)
+        logger.info(f"Uploading {file_size} bytes to bucket as {filename}")
+
+        # Upload to bucket
+        await upload_file(buffer, PRIMARY_BUCKET, filename)
+        logger.info(f"Uploaded YouTube video ({file_size} bytes) to bucket: {filename}")
+
+        # Get presigned URL
+        presigned_url = get_url(filename, PRIMARY_BUCKET)
+        logger.info(f"Generated presigned URL for YouTube video: {presigned_url}")
+
+        # Clean up temp file
+        try:
+            os.unlink(downloaded_path)
+            logger.info(f"Cleaned up temp file: {downloaded_path}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up temp file {downloaded_path}: {e}")
+
+        return presigned_url
 
     def _build_filter_complex(
         self,
@@ -996,6 +1241,12 @@ class VideoBuilder:
 
     async def export(self) -> AsyncGenerator[bytes, None, None]:
         """Build one ffmpeg command with all filters and stream output."""
+        # Download from YouTube if needed
+        if self._youtube_options is not None:
+            downloaded_path = await self._download_from_youtube()
+            self.input_path = downloaded_path
+            self._downloaded_path = downloaded_path
+
         if self._gif_options is not None:
             info = await asyncio.to_thread(
                 lambda: VideoBuilder.get_video_info(self.input_path)
@@ -1043,6 +1294,12 @@ class VideoBuilder:
 
     async def extract_audio(self) -> AsyncGenerator[bytes, None]:
         """Extract audio using builder trim/speed and constructor audio_format/audio_bitrate. Streams chunks."""
+        # Download from YouTube if needed
+        if self._youtube_options is not None:
+            downloaded_path = await self._download_from_youtube()
+            self.input_path = downloaded_path
+            self._downloaded_path = downloaded_path
+
         info = await asyncio.to_thread(
             lambda: VideoBuilder.get_video_info(self.input_path)
         )

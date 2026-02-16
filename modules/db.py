@@ -114,9 +114,22 @@ async def load_schemas():
                     progress smallint DEFAULT 0
                 )
             """)
+
+        # creating partial index as picking up jobs mostly on the queued and processing for faster picking up
+        await db.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_jobs_queue_pick
+            ON jobs (retries, created_at)
+            WHERE status = '{JobStatus.QUEUED.value}';
+        """)
+
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jobs_uid_version_status
+            ON jobs (uid, output_version, status);
+        """)
         logger.info("jobs table created")
 
         logger.info("creating workflows table")
+
         await db.execute(f"""
                 CREATE TABLE IF NOT EXISTS workflows(
                     id serial PRIMARY KEY,

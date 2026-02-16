@@ -260,10 +260,15 @@ async def retry_edit(edit_id: int, db: DBSession):
     if not row:
         raise HTTPException(status_code=404, detail="Edit not found")
     current_status = row.get("status")
-    if current_status not in (JobStatus.ERROR.value, JobStatus.CANCELLED.value):
+    # Allow retry for error, cancelled, and completed jobs
+    if current_status not in (
+        JobStatus.ERROR.value,
+        JobStatus.CANCELLED.value,
+        JobStatus.COMPLETED.value,
+    ):
         raise HTTPException(
             status_code=400,
-            detail=f"Can only retry edits with status error or cancelled, got {current_status}",
+            detail=f"Can only retry edits with status error, cancelled, or completed, got {current_status}",
         )
     updated = await db_update(
         db,
@@ -310,12 +315,93 @@ async def list_workflows(
     return WorkflowListResponse(workflows=result, total=len(result))
 
 
+@app.get("/workflows/executions")
+async def list_all_executions(db: DBSession, limit: int = 100, last_id: int = 0):
+    """Get all workflow executions with workflow names."""
+    rows = await db.fetch(
+        """
+        SELECT we.*, w.name as workflow_name
+        FROM workflow_executions we
+        LEFT JOIN workflows w ON we.workflow_id = w.id
+        WHERE we.id > $1
+        ORDER BY we.id ASC
+        LIMIT $2
+        """,
+        last_id,
+        limit,
+    )
+    return {"executions": [dict(r) for r in rows], "total": len(rows)}
+
+
+@app.get("/workflows/executions/{execution_id}/jobs")
+async def list_execution_jobs(execution_id: int, db: DBSession):
+    """List all jobs (steps) for a given workflow execution."""
+    row = await db.fetchrow(
+        "SELECT uid FROM workflow_executions WHERE id = $1",
+        execution_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    uid = row.get("uid")
+    if not uid:
+        raise HTTPException(status_code=404, detail="Execution has no associated jobs")
+
+    jobs = await read(
+        db,
+        "jobs",
+        {"uid": uid},
+        "AND",
+        limit=100,
+        last_id=0,
+    )
+    job_models = [Job(**_job_row_to_kwargs(j)).model_dump(mode="json") for j in jobs]
+    return {"uid": str(uid), "jobs": job_models}
+
+
 @app.get("/workflows/{workflow_id}")
 async def get_workflow(workflow_id: int, db: DBSession):
     rows = await read(db, "workflows", {"id": workflow_id}, "AND", limit=1, last_id=0)
     if not rows:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return _workflow_row_to_response(rows[0])
+
+
+@app.get("/workflows/{workflow_id}/executions")
+async def list_workflow_executions(
+    workflow_id: int, db: DBSession, limit: int = 50, last_id: int = 0
+):
+    """List executions for a specific workflow."""
+    rows = await read(
+        db,
+        "workflow_executions",
+        {"workflow_id": workflow_id},
+        "AND",
+        limit=limit,
+        last_id=last_id,
+    )
+    return {"executions": [dict(r) for r in rows], "total": len(rows)}
+async def list_execution_jobs(execution_id: int, db: DBSession):
+    """List all jobs (steps) for a given workflow execution."""
+    row = await db.fetchrow(
+        "SELECT uid FROM workflow_executions WHERE id = $1",
+        execution_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    uid = row.get("uid")
+    if not uid:
+        raise HTTPException(status_code=404, detail="Execution has no associated jobs")
+
+    jobs = await read(
+        db,
+        "jobs",
+        {"uid": uid},
+        "AND",
+        limit=100,
+        last_id=0,
+    )
+    job_models = [Job(**_job_row_to_kwargs(j)).model_dump(mode="json") for j in jobs]
+    return {"uid": str(uid), "jobs": job_models}
 
 
 @app.post("/workflows", response_model=VideoWorkflowCreateRequest)
@@ -350,6 +436,15 @@ async def update_workflow(workflow_id: int, body: WorkflowUpdateRequest, db: DBS
                 builder = builder.load(op, data=data)
     updated = await db_update(db, "workflows", set_values, id=workflow_id)
     return _workflow_row_to_response(updated[0])
+
+
+@app.delete("/workflows/{workflow_id}")
+async def delete_workflow(workflow_id: int, db: DBSession):
+    row = await db.fetchrow("SELECT id FROM workflows WHERE id = $1", workflow_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    await db_delete(db, "workflows", id=workflow_id)
+    return {"id": workflow_id, "deleted": True}
 
 
 @app.post("/workflows/{workflow_id}/retry")
@@ -395,23 +490,28 @@ async def execute_workflow(
         )
     filters = {}
     if id:
-        filters["id"] = id
+        try:
+            filters["id"] = int(id)  # Convert string to int for database query
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid workflow id")
     if name:
         filters["name"] = name
     if search:
         # should be done with like operator
         filters["search"] = search
 
-    workflow = await read(db, "workflows", filters, condition="OR")
-    if not workflow:
+    workflow_rows = await read(db, "workflows", filters, condition="OR")
+    if not workflow_rows:
         return HTTPException(404, "No workflows found")
-    workflow = workflow[0]
-    workflow = VideoWorkflowCreateRequest(**workflow)
+    workflow_row = workflow_rows[0]
+    workflow_id = workflow_row.get("id")
+    workflow_req = VideoWorkflowCreateRequest(**workflow_row)
     uid = uuid4()
+
     jobs = []
     responses = []
-    for version, workflow in enumerate(workflow.steps):
-        actions = [{"op": o.op, "data": o.get_data()} for o in workflow]
+    for version, step in enumerate(workflow_req.steps):
+        actions = [{"op": o.op, "data": o.get_data()} for o in step]
         jobs.append(
             Job(
                 uid=str(uid),
@@ -422,9 +522,20 @@ async def execute_workflow(
             )
         )
 
-        responses.append(
-            VideoWorkflowStep(uid=str(uid), operations=workflow, media=media)
-        )
+        responses.append(VideoWorkflowStep(uid=str(uid), operations=step, media=media))
     jobs[0].input = media
     await Worker.enqueue(db, jobs)
+
+    # Track workflow execution (link workflow_id + uid)
+    if workflow_id:
+        now = datetime.utcnow()
+        await create(
+            db,
+            "workflow_executions",
+            workflow_id=workflow_id,
+            uid=str(uid),
+            created_at=now,
+            updated_at=now,
+        )
+
     return VideoWorkflowExecutionResponse(workflows=responses)

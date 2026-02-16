@@ -39,8 +39,15 @@ async def upload_file(
     file: BinaryIO, bucketname: str = PRIMARY_BUCKET, filename: str = None
 ):
     client = get_client()
+    # Ensure file position is at the beginning for upload
+    if hasattr(file, "seek"):
+        file.seek(0)
     await asyncio.to_thread(
-        lambda: client.upload_fileobj(file, bucketname, filename if file else file.name)
+        lambda: client.upload_fileobj(
+            file,
+            bucketname,
+            filename if filename else (file.name if hasattr(file, "name") else None),
+        )
     )
     return True
 
@@ -60,8 +67,37 @@ def get_url(filename: str, bucketname: str, upload=False):
 
 
 def get_filename_from_url(url: str) -> str:
+    """Extract filename from URL, handling YouTube URLs and presigned URLs."""
     parsed_url = urlparse(url)
-    return parsed_url.path.split("/")[-1] if parsed_url else ""
+
+    # Handle YouTube URLs - extract video ID or use a default name
+    if "youtube.com" in parsed_url.netloc or "youtu.be" in parsed_url.netloc:
+        # Try to extract video ID from query params
+        from urllib.parse import parse_qs
+
+        query_params = parse_qs(parsed_url.query)
+        if "v" in query_params:
+            video_id = query_params["v"][0]
+            return f"youtube_{video_id}"
+        # For youtu.be short URLs, the ID is in the path
+        if "youtu.be" in parsed_url.netloc:
+            video_id = parsed_url.path.lstrip("/")
+            if video_id:
+                return f"youtube_{video_id}"
+        return "youtube_video"
+
+    # For presigned URLs or regular URLs, extract filename from path
+    path = parsed_url.path
+    if path:
+        filename = path.split("/")[-1]
+        # Remove query string if present in filename (shouldn't happen but be safe)
+        if "?" in filename:
+            filename = filename.split("?")[0]
+        if filename:
+            return filename
+
+    # Fallback: generate a name from the URL
+    return "video"
 
 
 async def delete_file(filename: str, bucketname: str = PRIMARY_BUCKET) -> None:

@@ -2,7 +2,7 @@
 
 import { type Client, formDataBodySerializer, type Options as Options2, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { CancelEditEditsEditIdCancelPostData, CancelEditEditsEditIdCancelPostErrors, CancelEditEditsEditIdCancelPostResponses, CreateWorkflowWorkflowsPostData, CreateWorkflowWorkflowsPostErrors, CreateWorkflowWorkflowsPostResponses, DeleteFileFromBucketBucketFilesFileIdDeleteData, DeleteFileFromBucketBucketFilesFileIdDeleteErrors, DeleteFileFromBucketBucketFilesFileIdDeleteResponses, EditVideoEditsPostData, EditVideoEditsPostErrors, EditVideoEditsPostResponses, ExecuteWorkflowWorkflowsExecutePostData, ExecuteWorkflowWorkflowsExecutePostErrors, ExecuteWorkflowWorkflowsExecutePostResponses, GetEditEditsEditIdGetData, GetEditEditsEditIdGetErrors, GetEditEditsEditIdGetResponses, GetWorkflowWorkflowsWorkflowIdGetData, GetWorkflowWorkflowsWorkflowIdGetErrors, GetWorkflowWorkflowsWorkflowIdGetResponses, ListEditsEditsGetData, ListEditsEditsGetErrors, ListEditsEditsGetResponses, ListFilesBucketGetData, ListFilesBucketGetErrors, ListFilesBucketGetResponses, ListWorkflowsWorkflowsGetData, ListWorkflowsWorkflowsGetErrors, ListWorkflowsWorkflowsGetResponses, RetryEditEditsEditIdRetryPostData, RetryEditEditsEditIdRetryPostErrors, RetryEditEditsEditIdRetryPostResponses, RetryWorkflowWorkflowsWorkflowIdRetryPostData, RetryWorkflowWorkflowsWorkflowIdRetryPostErrors, RetryWorkflowWorkflowsWorkflowIdRetryPostResponses, StreamJobsEditsStatusGetData, StreamJobsEditsStatusGetErrors, StreamJobsEditsStatusGetResponses, UpdateEditEditsEditIdPatchData, UpdateEditEditsEditIdPatchErrors, UpdateEditEditsEditIdPatchResponses, UpdateWorkflowWorkflowsWorkflowIdPatchData, UpdateWorkflowWorkflowsWorkflowIdPatchErrors, UpdateWorkflowWorkflowsWorkflowIdPatchResponses, UploadFileToBucketBucketUploadPostData, UploadFileToBucketBucketUploadPostErrors, UploadFileToBucketBucketUploadPostResponses } from './types.gen';
+import type { CancelEditEditsEditIdCancelPostData, CancelEditEditsEditIdCancelPostErrors, CancelEditEditsEditIdCancelPostResponses, CreateWorkflowWorkflowsPostData, CreateWorkflowWorkflowsPostErrors, CreateWorkflowWorkflowsPostResponses, DeleteFileFromBucketBucketFilesFileIdDeleteData, DeleteFileFromBucketBucketFilesFileIdDeleteErrors, DeleteFileFromBucketBucketFilesFileIdDeleteResponses, DeleteWorkflowWorkflowsWorkflowIdDeleteData, DeleteWorkflowWorkflowsWorkflowIdDeleteErrors, DeleteWorkflowWorkflowsWorkflowIdDeleteResponses, EditVideoEditsPostData, EditVideoEditsPostErrors, EditVideoEditsPostResponses, ExecuteWorkflowWorkflowsExecutePostData, ExecuteWorkflowWorkflowsExecutePostErrors, ExecuteWorkflowWorkflowsExecutePostResponses, GetEditEditsEditIdGetData, GetEditEditsEditIdGetErrors, GetEditEditsEditIdGetResponses, GetWorkflowWorkflowsWorkflowIdGetData, GetWorkflowWorkflowsWorkflowIdGetErrors, GetWorkflowWorkflowsWorkflowIdGetResponses, ListEditsEditsGetData, ListEditsEditsGetErrors, ListEditsEditsGetResponses, ListFilesBucketGetData, ListFilesBucketGetErrors, ListFilesBucketGetResponses, ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetData, ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetErrors, ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetResponses, ListWorkflowsWorkflowsGetData, ListWorkflowsWorkflowsGetErrors, ListWorkflowsWorkflowsGetResponses, RetryEditEditsEditIdRetryPostData, RetryEditEditsEditIdRetryPostErrors, RetryEditEditsEditIdRetryPostResponses, RetryWorkflowWorkflowsWorkflowIdRetryPostData, RetryWorkflowWorkflowsWorkflowIdRetryPostErrors, RetryWorkflowWorkflowsWorkflowIdRetryPostResponses, StreamJobsEditsStatusGetData, StreamJobsEditsStatusGetErrors, StreamJobsEditsStatusGetResponses, UpdateEditEditsEditIdPatchData, UpdateEditEditsEditIdPatchErrors, UpdateEditEditsEditIdPatchResponses, UpdateWorkflowWorkflowsWorkflowIdPatchData, UpdateWorkflowWorkflowsWorkflowIdPatchErrors, UpdateWorkflowWorkflowsWorkflowIdPatchResponses, UploadFileToBucketBucketUploadPostData, UploadFileToBucketBucketUploadPostErrors, UploadFileToBucketBucketUploadPostResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean> = Options2<TData, ThrowOnError> & {
     /**
@@ -108,6 +108,11 @@ export const createWorkflowWorkflowsPost = <ThrowOnError extends boolean = false
 });
 
 /**
+ * Delete Workflow
+ */
+export const deleteWorkflowWorkflowsWorkflowIdDelete = <ThrowOnError extends boolean = false>(options: Options<DeleteWorkflowWorkflowsWorkflowIdDeleteData, ThrowOnError>) => (options.client ?? client).delete<DeleteWorkflowWorkflowsWorkflowIdDeleteResponses, DeleteWorkflowWorkflowsWorkflowIdDeleteErrors, ThrowOnError>({ url: '/workflows/{workflow_id}', ...options });
+
+/**
  * Get Workflow
  */
 export const getWorkflowWorkflowsWorkflowIdGet = <ThrowOnError extends boolean = false>(options: Options<GetWorkflowWorkflowsWorkflowIdGetData, ThrowOnError>) => (options.client ?? client).get<GetWorkflowWorkflowsWorkflowIdGetResponses, GetWorkflowWorkflowsWorkflowIdGetErrors, ThrowOnError>({ url: '/workflows/{workflow_id}', ...options });
@@ -123,6 +128,11 @@ export const updateWorkflowWorkflowsWorkflowIdPatch = <ThrowOnError extends bool
         ...options.headers
     }
 });
+
+/**
+ * List Workflow Executions
+ */
+export const listWorkflowExecutionsWorkflowsWorkflowIdExecutionsGet = <ThrowOnError extends boolean = false>(options: Options<ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetData, ThrowOnError>) => (options.client ?? client).get<ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetResponses, ListWorkflowExecutionsWorkflowsWorkflowIdExecutionsGetErrors, ThrowOnError>({ url: '/workflows/{workflow_id}/executions', ...options });
 
 /**
  * Retry Workflow

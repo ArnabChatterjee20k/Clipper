@@ -12,6 +12,7 @@ dependencies = [
     "prometheus-client>=0.24.1",
     "pytest-asyncio>=1.2.0",
     "requests>=2.32.5",
+    "yt-dlp>=2025.10.14",
 ]
 
 [tool.pytest.ini_options]

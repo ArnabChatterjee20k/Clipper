@@ -7,6 +7,7 @@ from .video_processor import (
     AudioOverlay,
     BackgroundColor,
     TranscodeOptions,
+    YouTubeDownloadOptions,
 )
 from datetime import datetime
 
@@ -136,6 +137,19 @@ class GifOp(VideoEditOperation):
     output_codec: str = "gif"
 
 
+class DownloadFromYouTubeOp(VideoEditOperation):
+    op: Literal["download_from_youtube"]
+    quality: Optional[str] = "best"
+    format: Optional[str] = None
+    audio_only: bool = False
+    options: Optional[YouTubeDownloadOptions] = None
+
+    def get_data(self) -> Any:
+        if self.options is not None:
+            return _to_data_dict(self.options)
+        return self.model_dump(exclude=["op", "options"])
+
+
 # discriminator works only on Union and not on the list
 VideoOperationStep = Annotated[
     Union[
@@ -150,6 +164,7 @@ VideoOperationStep = Annotated[
         ConcatOp,
         ExtractAudioOp,
         GifOp,
+        DownloadFromYouTubeOp,
     ],
     Field(discriminator="op"),
 ]

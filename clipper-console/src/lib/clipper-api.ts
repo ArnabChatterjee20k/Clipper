@@ -248,6 +248,40 @@ export async function executeWorkflow(params: {
   return res.json();
 }
 
+export async function deleteWorkflow(workflowId: number): Promise<{ id: number; deleted: boolean }> {
+  const res = await fetch(`${API}/workflows/${workflowId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => `Delete workflow failed: ${res.status}`));
+  return res.json();
+}
+
+export async function listWorkflowExecutions(workflowId: number, params?: { limit?: number; last_id?: number }): Promise<{ executions: Array<{ id: number; workflow_id: number; progress?: number; created_at?: string; updated_at?: string }>; total: number }> {
+  const sp = new URLSearchParams();
+  if (params?.limit != null) sp.set("limit", String(params.limit));
+  if (params?.last_id != null) sp.set("last_id", String(params.last_id));
+  const q = sp.toString();
+  const res = await fetch(`${API}/workflows/${workflowId}/executions${q ? `?${q}` : ""}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => `List workflow executions failed: ${res.status}`));
+  return res.json();
+}
+
+export async function listAllExecutions(params?: { limit?: number; last_id?: number }): Promise<{ executions: Array<{ id: number; workflow_id: number; progress?: number; created_at?: string; updated_at?: string; workflow_name?: string }>; total: number }> {
+  const sp = new URLSearchParams();
+  if (params?.limit != null) sp.set("limit", String(params.limit));
+  if (params?.last_id != null) sp.set("last_id", String(params.last_id));
+  const q = sp.toString();
+  const res = await fetch(`${API}/workflows/executions${q ? `?${q}` : ""}`);
+  if (!res.ok) throw new Error(await res.text().catch(() => `List all executions failed: ${res.status}`));
+  return res.json();
+}
+
+export async function listExecutionJobs(executionId: number): Promise<{ uid: string; jobs: unknown[] }> {
+  const res = await fetch(`${API}/workflows/executions/${executionId}/jobs`);
+  if (!res.ok) throw new Error(await res.text().catch(() => `List execution jobs failed: ${res.status}`));
+  return res.json();
+}
+
 export async function retryWorkflow(workflowId: number, body: WorkflowRetryBody): Promise<{ uid: string; workflow_id: number; requeued: number; jobs: unknown[] }> {
   const res = await fetch(`${API}/workflows/${workflowId}/retry`, {
     method: "POST",

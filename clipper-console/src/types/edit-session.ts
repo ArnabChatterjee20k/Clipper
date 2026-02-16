@@ -124,6 +124,14 @@ export interface GifOp {
   output_codec?: string;
 }
 
+/** Download from YouTube */
+export interface DownloadFromYouTubeOp {
+  op: "download_from_youtube";
+  quality?: string | null;
+  format?: string | null;
+  audio_only?: boolean;
+}
+
 /** Single operation in the pipeline (discriminated by op) */
 export type VideoOperation =
   | TrimOp
@@ -136,7 +144,8 @@ export type VideoOperation =
   | CompressOp
   | ConcatOp
   | ExtractAudioOp
-  | GifOp;
+  | GifOp
+  | DownloadFromYouTubeOp;
 
 /** Request body for POST /edits. media must be presigned URL. */
 export interface VideoEditRequest {
@@ -224,4 +233,11 @@ export const defaultGifOp: GifOp = {
   fps: 10,
   scale: 480,
   output_codec: "gif",
+};
+
+export const defaultDownloadFromYouTubeOp: DownloadFromYouTubeOp = {
+  op: "download_from_youtube",
+  quality: "best",
+  format: null,
+  audio_only: false,
 };

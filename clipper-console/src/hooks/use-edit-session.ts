@@ -17,6 +17,7 @@ import {
   defaultConcatOp,
   defaultExtractAudioOp,
   defaultGifOp,
+  defaultDownloadFromYouTubeOp,
 } from "@/types/edit-session";
 
 export interface EditSessionState {
@@ -103,5 +104,6 @@ export function useEditSession() {
     addConcat: () => addOperation(defaultConcatOp),
     addExtractAudio: () => addOperation(defaultExtractAudioOp),
     addGif: () => addOperation(defaultGifOp),
+    addDownloadFromYouTube: () => addOperation(defaultDownloadFromYouTubeOp),
   };
 }

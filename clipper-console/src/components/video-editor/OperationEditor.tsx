@@ -15,6 +15,7 @@ import type {
   CompressOp,
   ConcatOp,
   GifOp,
+  DownloadFromYouTubeOp,
 } from "@/types/edit-session";
 import { WATERMARK_POSITIONS } from "@/types/edit-session";
 import {
@@ -56,6 +57,7 @@ const OP_LABELS: Record<string, string> = {
   concat: "Concat",
   extractAudio: "Extract audio",
   gif: "GIF",
+  download_from_youtube: "Download from YouTube",
 };
 
 export function OperationEditor({ operation, onChange, onRemove, variant = "card", className }: OperationEditorProps) {
@@ -71,9 +73,10 @@ export function OperationEditor({ operation, onChange, onRemove, variant = "card
         {operation.op === "backgroundColor" && <BackgroundColorEditor op={operation} onChange={(op) => onChange(op)} />}
         {operation.op === "transcode" && <TranscodeEditor op={operation} onChange={(op) => onChange(op)} />}
         {operation.op === "compress" && <CompressEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "concat" && <ConcatEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "extractAudio" && <p className="text-xs text-muted-foreground">Extract audio track only. No options.</p>}
-        {operation.op === "gif" && <GifEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "concat" && <ConcatEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "extractAudio" && <p className="text-xs text-muted-foreground">Extract audio track only. No options.</p>}
+      {operation.op === "gif" && <GifEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "download_from_youtube" && <YouTubeDownloadEditor op={operation} onChange={(op) => onChange(op)} />}
     </>
   );
 
@@ -710,6 +713,58 @@ function GifEditor({ op, onChange }: { op: GifOp; onChange: (op: GifOp) => void 
         <Label className="text-xs">Width (scale)</Label>
         <Input type="number" min={100} value={op.scale ?? 480} onChange={(e) => onChange({ ...op, scale: Number(e.target.value) || 480 })} className="h-8" />
       </div>
+    </div>
+  );
+}
+
+function YouTubeDownloadEditor({ op, onChange }: { op: DownloadFromYouTubeOp; onChange: (op: DownloadFromYouTubeOp) => void }) {
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="audio-only"
+            checked={op.audio_only ?? false}
+            onChange={(e) => onChange({ ...op, audio_only: e.target.checked })}
+            className="h-4 w-4 rounded border-input"
+          />
+          <Label htmlFor="audio-only" className="text-xs cursor-pointer">
+            Audio only
+          </Label>
+        </div>
+      </div>
+      {!op.audio_only && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Quality</Label>
+            <select
+              className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+              value={op.quality ?? "best"}
+              onChange={(e) => onChange({ ...op, quality: e.target.value || null })}
+            >
+              <option value="best">Best</option>
+              <option value="worst">Worst</option>
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+              <option value="1440p">1440p</option>
+              <option value="2160p">2160p (4K)</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Format (optional)</Label>
+            <Input
+              value={op.format ?? ""}
+              onChange={(e) => onChange({ ...op, format: e.target.value || null })}
+              placeholder="e.g. mp4, webm"
+              className="h-8"
+            />
+          </div>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Note: The media URL should be a YouTube URL when using this operation.
+      </p>
     </div>
   );
 }
