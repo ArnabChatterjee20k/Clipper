@@ -30,7 +30,7 @@ async def get_db():
 DBSession = Annotated[asyncpg.Connection, Depends(get_db)]
 
 CONDITION = Literal["AND", "OR"]
-TABLE = Literal["buckets", "files", "jobs", "workflows"]
+TABLE = Literal["buckets", "files", "jobs", "workflows", "downloads"]
 
 
 @dataclass
@@ -69,6 +69,21 @@ class OutputFile:
     video_format: str
     audio_format: str
     audio_bitrate: str
+
+
+@dataclass
+class Download:
+    id: Optional[int] = field(init=False, default=-1)
+    youtube_url: str
+    video_id: str
+    filename: str
+    bucketname: str
+    video_title: Optional[str] = None
+    file_id: Optional[int] = None
+    quality: Optional[str] = None
+    format: Optional[str] = None
+    audio_only: bool = False
+    created_at: datetime = datetime.now()
 
 
 # TODO: add indexes
@@ -152,6 +167,33 @@ async def load_schemas():
                 )
             """)
         logger.info("workflow_executions table created")
+
+        logger.info("creating downloads table")
+        await db.execute("""
+                CREATE TABLE IF NOT EXISTS downloads(
+                    id serial PRIMARY KEY,
+                    youtube_url TEXT NOT NULL,
+                    video_id VARCHAR(50) NOT NULL,
+                    video_title TEXT,
+                    filename VARCHAR(200) NOT NULL,
+                    bucketname VARCHAR(50) NOT NULL,
+                    file_id INTEGER REFERENCES files(id),
+                    quality VARCHAR(20),
+                    format VARCHAR(20),
+                    audio_only BOOLEAN DEFAULT FALSE,
+                    created_at timestamp NOT NULL,
+                    UNIQUE(youtube_url, quality, format, audio_only)
+                )
+            """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_downloads_youtube_url
+            ON downloads (youtube_url);
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_downloads_video_id
+            ON downloads (video_id);
+        """)
+        logger.info("downloads table created")
 
 
 async def create(db: asyncpg.Connection, table: TABLE, **records) -> int:

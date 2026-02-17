@@ -125,7 +125,7 @@ class Worker:
             opts = download_op.get("data") or {}
 
             filename, presigned_url = await download_youtube_to_bucket(
-                youtube_url, opts
+                youtube_url, opts, db=db
             )
             logger.info(
                 f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] "
