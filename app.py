@@ -149,6 +149,8 @@ async def edit_video(edit: VideoEditRequest, db: DBSession):
     builder = VideoBuilder(edit.media)
     # validating first then enqueueing
     for operation in edit.operations:
+        if operation == "download_from_youtube":
+            pass
         builder = builder.load(operation.op, data=operation.get_data())
     actions = [{"op": o.op, "data": o.get_data()} for o in edit.operations]
     await Worker.enqueue(
@@ -199,7 +201,7 @@ async def stream_jobs(uid: str, db: DBSession):
                     last_seen[jid] = version
                     yield f"event: job_update\ndata: {job.model_dump_json()}\n\n"
 
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
 
     return StreamingResponse(
         event_stream(),
@@ -380,6 +382,8 @@ async def list_workflow_executions(
         last_id=last_id,
     )
     return {"executions": [dict(r) for r in rows], "total": len(rows)}
+
+
 async def list_execution_jobs(execution_id: int, db: DBSession):
     """List all jobs (steps) for a given workflow execution."""
     row = await db.fetchrow(
@@ -410,6 +414,8 @@ async def create_workflow(db: DBSession, workflow: VideoWorkflowCreateRequest):
         builder = VideoBuilder("")
         # validation
         for operation in step:
+            if operation == "download_from_youtube":
+                pass
             builder = builder.load(operation.op, data=operation.get_data())
 
     workflow_id = await create(db, "workflows", **workflow.model_dump())
@@ -433,6 +439,8 @@ async def update_workflow(workflow_id: int, body: WorkflowUpdateRequest, db: DBS
             for op_dict in step:
                 op = op_dict.get("op")
                 data = {k: v for k, v in op_dict.items() if k != "op"}
+                if op == "download_from_youtube":
+                    pass
                 builder = builder.load(op, data=data)
     updated = await db_update(db, "workflows", set_values, id=workflow_id)
     return _workflow_row_to_response(updated[0])

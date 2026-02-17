@@ -15,6 +15,7 @@ from .db import (
     File as BucketFileModel,
 )
 from .video_processor import VideoBuilder
+from .video_downloader import download_youtube_to_bucket
 from .buckets import upload_file, PRIMARY_BUCKET, get_filename_from_url, get_url
 from .metrics import (
     job_enqueue_duration_seconds,
@@ -106,39 +107,70 @@ class Worker:
                 )
 
         start_time = time.monotonic()
-        builder = VideoBuilder(
-            job.input,
-            complete_callback=lambda e: logger.info(
-                f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] Completed"
-            ),
-            progress_callback=update_job_progress,
+
+        # HACK: very hacky way if in a single edit if there is yt video then we are downloading it first in the single worker
+        # best way would be to schedule two jobs first -> download , builder -> a mini workflow
+        # TODO: handle the validation in the api side only -> download should be always very first operation
+        download_op = next(
+            (op for op in job.action if op.get("op") == "download_from_youtube"), None
         )
-        for operation in job.action:
-            op = operation.get("op")
-            data = operation.get("data")
-            builder = builder.load(op, data=data)
-        result = await builder.export_to_bytes()
-        full_filename = get_filename_from_url(job.input)
-        base, _, ext = full_filename.rpartition(".")
-        base = base or full_filename
 
-        # Ensure we have a valid base name
-        if not base or base == "":
-            base = "video"
+        input_url = job.input
+        builder = None
+        result = None
+        output_filename = None
 
-        # Determine extension based on operation or file extension
-        if getattr(builder, "_gif_options", None) is not None:
-            ext = "gif"
-        elif not ext or ext == "":
-            # Default to mp4 if no extension found
-            ext = "mp4"
+        if download_op is not None:
+            youtube_url = job.input
+            opts = download_op.get("data") or {}
 
-        # Ensure extension is valid (not something like "watch")
-        valid_extensions = ["mp4", "webm", "mkv", "mp3", "m4a", "gif", "mov", "avi"]
-        if ext.lower() not in valid_extensions:
-            ext = "mp4"
+            filename, presigned_url = await download_youtube_to_bucket(
+                youtube_url, opts
+            )
+            logger.info(
+                f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] "
+                f"Downloaded YouTube media to bucket as {filename} (url={presigned_url})"
+            )
 
-        filename = f"{base}_output_{job.uid}_{job.output_version}.{ext}"
+            output_filename = filename
+            input_url = presigned_url
+
+        has_other_ops = any(
+            op.get("op") != "download_from_youtube" for op in job.action
+        )
+
+        if has_other_ops:
+            builder = VideoBuilder(
+                input_url,
+                complete_callback=lambda e: logger.info(
+                    f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] Completed"
+                ),
+                progress_callback=update_job_progress,
+            )
+            for operation in job.action:
+                op = operation.get("op")
+                data = operation.get("data")
+                if op == "download_from_youtube":
+                    continue
+                builder = builder.load(op, data=data)
+            result = await builder.export_to_bytes()
+            full_filename = get_filename_from_url(input_url)
+            base, _, ext = full_filename.rpartition(".")
+            base = base or full_filename
+
+            if not base or base == "":
+                base = "video"
+
+            if getattr(builder, "_gif_options", None) is not None:
+                ext = "gif"
+            elif not ext or ext == "":
+                ext = "mp4"
+
+            valid_extensions = ["mp4", "webm", "mkv", "mp3", "m4a", "gif", "mov", "avi"]
+            if ext.lower() not in valid_extensions:
+                ext = "mp4"
+
+            output_filename = f"{base}_output_{job.uid}_{job.output_version}.{ext}"
         try:
             async with db.transaction():
                 sql = f"""
@@ -152,10 +184,16 @@ class Worker:
                     json.dumps(
                         asdict(
                             OutputFile(
-                                filename=filename,
-                                audio_bitrate=builder._audio_bitrate,
-                                video_format=builder._video_format,
-                                audio_format=builder._audio_format,
+                                filename=output_filename,
+                                audio_bitrate=(
+                                    builder._audio_bitrate if builder else "192k"
+                                ),
+                                video_format=(
+                                    builder._video_format if builder else "mp4"
+                                ),
+                                audio_format=(
+                                    builder._audio_format if builder else "aac"
+                                ),
                             )
                         )
                     ),
@@ -163,16 +201,24 @@ class Worker:
                 await create(
                     db,
                     "files",
-                    **asdict(BucketFileModel(name=filename, bucketname=PRIMARY_BUCKET)),
+                    **asdict(
+                        BucketFileModel(name=output_filename, bucketname=PRIMARY_BUCKET)
+                    ),
                 )
-                await upload_file(io.BytesIO(result), PRIMARY_BUCKET, filename=filename)
+
+                if result is not None:
+                    await upload_file(
+                        io.BytesIO(result),
+                        PRIMARY_BUCKET,
+                        filename=output_filename,
+                    )
             duration_ms = (time.monotonic() - start_time) * 1000
             job_processing_duration_seconds.labels(
                 status=JobStatus.COMPLETED.value
             ).observe(duration_ms)
             job_status_total.labels(status=JobStatus.COMPLETED.value).inc()
             logger.info(
-                f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [OUTPUT FILE]  {filename}"
+                f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [OUTPUT FILE]  {output_filename}"
             )
         except Exception as e:
             duration_ms = (time.monotonic() - start_time) * 1000

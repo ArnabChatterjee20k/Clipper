@@ -7,8 +7,8 @@ from .video_processor import (
     AudioOverlay,
     BackgroundColor,
     TranscodeOptions,
-    YouTubeDownloadOptions,
 )
+from .video_downloader import YouTubeDownloadOptions
 from datetime import datetime
 
 

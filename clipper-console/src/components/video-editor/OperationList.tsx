@@ -97,6 +97,12 @@ export function OperationList({
   const [selectValue, setSelectValue] = useState<string>(ADD_PLACEHOLDER);
 
   const handleAdd = (opType: VideoOperation["op"]) => {
+    // Download from YouTube is only allowed as the first operation.
+    if (opType === "download_from_youtube" && operations.length > 0) {
+      setSelectValue(ADD_PLACEHOLDER);
+      return;
+    }
+
     setSelectValue(ADD_PLACEHOLDER);
     const helpers: Record<string, () => void> = {
       trim: addTrim ?? (() => onAdd({ op: "trim", start_sec: 0, end_sec: -1 })),
@@ -132,7 +138,11 @@ export function OperationList({
               Add operation
             </SelectItem>
             {OP_TYPES.map((t) => (
-              <SelectItem key={t.value} value={t.value}>
+              <SelectItem
+                key={t.value}
+                value={t.value}
+                disabled={t.value === "download_from_youtube" && operations.length > 0}
+              >
                 {t.label}
               </SelectItem>
             ))}

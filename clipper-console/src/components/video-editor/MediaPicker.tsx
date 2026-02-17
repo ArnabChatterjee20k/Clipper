@@ -21,6 +21,8 @@ export interface MediaPickerProps {
   mediaDisplayName?: string;
   /** Called with (presignedUrl, displayName) when user selects a file. */
   onSelect: (url: string, displayName?: string) => void;
+  /** When true, show "Import from YouTube" input instead of bucket/file picker. */
+  showYouTubeImport?: boolean;
   className?: string;
 }
 
@@ -33,6 +35,7 @@ export function MediaPicker({
   media,
   mediaDisplayName,
   onSelect,
+  showYouTubeImport,
   className,
 }: MediaPickerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -100,72 +103,68 @@ export function MediaPicker({
           ) : null}
 
           <div className="space-y-3">
-            <div className="space-y-2">
-              <Label className="text-xs">YouTube URL (optional)</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="url"
-                  value={youtubeUrl}
-                  onChange={(e) => setYoutubeUrl(e.target.value)}
-                  onKeyDown={handleYouTubeUrlKeyDown}
-                  placeholder="https://www.youtube.com/watch?v=..."
-                  className="h-8 flex-1"
+            {showYouTubeImport ? (
+              <div className="space-y-2">
+                <Label className="text-xs">Import from YouTube</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    onKeyDown={handleYouTubeUrlKeyDown}
+                    placeholder="https://www.youtube.com/watch?v=..."
+                    className="h-8 flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleYouTubeUrlSubmit}
+                    disabled={!youtubeUrl.trim() || !isValidYouTubeUrl(youtubeUrl.trim())}
+                  >
+                    <Youtube className="size-4" />
+                    Use URL
+                  </Button>
+                </div>
+                {youtubeUrl && !isValidYouTubeUrl(youtubeUrl.trim()) && (
+                  <p className="text-xs text-destructive">Please enter a valid YouTube URL</p>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2 mx-0 items-center justify-center">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="video/*"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  disabled={uploading}
                 />
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={handleYouTubeUrlSubmit}
-                  disabled={!youtubeUrl.trim() || !isValidYouTubeUrl(youtubeUrl.trim())}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
                 >
-                  <Youtube className="size-4" />
-                  Use URL
+                  {uploading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
+                  {uploading ? "Uploading…" : "Upload file"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBucketModalOpen(true)}
+                >
+                  <FolderOpen className="size-4" />
+                  Pick from bucket
                 </Button>
               </div>
-              {youtubeUrl && !isValidYouTubeUrl(youtubeUrl.trim()) && (
-                <p className="text-xs text-destructive">Please enter a valid YouTube URL</p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-border" />
-              <span className="text-xs text-muted-foreground">OR</span>
-              <div className="flex-1 h-px bg-border" />
-            </div>
-
-            <div className="flex flex-wrap gap-2 mx-0 items-center justify-center">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={handleFileChange}
-                disabled={uploading}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-              >
-                {uploading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Upload className="size-4" />
-                )}
-                {uploading ? "Uploading…" : "Upload file"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setBucketModalOpen(true)}
-              >
-                <FolderOpen className="size-4" />
-                Pick from bucket
-              </Button>
-            </div>
+            )}
           </div>
           {uploadError ? (
             <p className="text-xs text-destructive">{uploadError.message}</p>

@@ -51,10 +51,14 @@ export function VideoEditView() {
         <div className="grid gap-8 lg:grid-cols-10 min-w-0">
           {/* Left: source + run */}
           <div className="lg:col-span-4 space-y-6 min-w-0 overflow-hidden">
+            {/* When the first operation is a YouTube download, switch source UI to "Import from YouTube" */}
+            {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
+            {/* @ts-ignore - allow custom prop on MediaPicker */}
             <MediaPicker
               media={media}
               mediaDisplayName={mediaDisplayName}
               onSelect={setMedia}
+              showYouTubeImport={operations[0]?.op === "download_from_youtube"}
             />
             <SubmitAndStatus
               toRequest={toRequest}
