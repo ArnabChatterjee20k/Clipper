@@ -2,16 +2,24 @@ import boto3, botocore
 import asyncio
 from urllib.parse import urlparse
 from typing import BinaryIO
+import os
 
 PRIMARY_BUCKET = "primary"
 
+env_mode = os.getenv("CLIPPER_ENV", "dev").lower()
+is_in_container = env_mode == "production"
+
 
 def get_client():
+    endpoint_url = os.getenv("CLIPPER_MINIK_ENDPOINT_URL", "http://localhost:9000")
+    access_key_id = os.getenv("CLIPPER_AWS_ACCESS_KEY_ID")
+    secret_access_key = os.getenv("CLIPPER_AWS_SECRET_ACCESS_KEY")
+
     return boto3.client(
         "s3",
-        aws_access_key_id="minio-root-user",
-        aws_secret_access_key="minio-root-password",
-        endpoint_url="http://localhost:9000",
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        endpoint_url=endpoint_url,
     )
 
 
@@ -63,7 +71,11 @@ def get_url(filename: str, bucketname: str, upload=False):
         Params={"Bucket": bucketname, "Key": filename},
         ExpiresIn=7200,
     )
-    return url.replace("localhost", "minik")
+    if not is_in_container:
+        s3_host = os.environ.get("CLIPPER_PUBLIC_S3_HOST")
+        s3_port = os.environ.get("CLIPPER_PUBLIC_S3_PORT")
+        return url.replace(f"{s3_host}:{s3_port}", f"localhost:{s3_port}")
+    return url
 
 
 def get_filename_from_url(url: str) -> str:

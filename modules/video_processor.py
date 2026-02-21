@@ -1,5 +1,5 @@
 # For easy reference and getting the processor idea check the scripts/ffmpeg.py file
-import json, subprocess, re
+import json, subprocess, re, os
 import asyncio
 from datetime import datetime
 from typing import Optional, Protocol, AsyncGenerator, Any, Union, Type
@@ -240,13 +240,21 @@ async def get_progress(
 
 
 def get_cmd(input: list[str]):
+    env_mode = os.getenv("CLIPPER_ENV", "").lower()
+    is_in_container = env_mode == "production"
+
+    if is_in_container:
+        return input
+
+    # On host: use docker compose exec to run inside clipper service
+    clipper_service = os.getenv("CLIPPER_CONTAINER_NAME")
     return [
         "docker",
         "compose",
         "exec",
         "-i",
         "-T",
-        "clipper",
+        clipper_service,
         *input,
     ]
 

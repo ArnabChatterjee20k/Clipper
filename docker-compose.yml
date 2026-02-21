@@ -6,6 +6,8 @@ services:
       - "8002:8000"
     volumes:
       - ./media:/code/media
+    environment:
+      - CLIPPER_ENV=production
     depends_on:
       - postgres
       - minik

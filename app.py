@@ -22,6 +22,7 @@ from modules.db import (
     File as FileModel,
 )
 from modules.worker import Job, JobStatus, Worker, WorkerPool
+from modules.logger import logger
 from modules.video_processor import VideoBuilder
 from dataclasses import asdict
 from modules.responses import (
@@ -46,6 +47,10 @@ from modules.metrics import registry
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from consumers import ConsumerManager
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 @asynccontextmanager
@@ -166,7 +171,9 @@ async def edit_video(edit: VideoEditRequest, db: DBSession):
 
 
 def _job_row_to_kwargs(row) -> dict:
-    """Convert a DB row to kwargs for Job, parsing jsonb fields if they come back as strings."""
+    """Convert a DB row to kwargs for Job, parsing jsonb fields if they come back as strings.
+    Also enriches output with a presigned URL when possible.
+    """
     d = dict(row)
     for key in ("output", "action"):
         if isinstance(d.get(key), str):
@@ -174,6 +181,15 @@ def _job_row_to_kwargs(row) -> dict:
                 d[key] = json.loads(d[key])
             except (ValueError, TypeError):
                 pass
+    output = d.get("output")
+    if isinstance(output, dict) and output.get("filename"):
+        try:
+            filename = output.get("filename")
+            if filename:
+                output["url"] = get_url(str(filename), PRIMARY_BUCKET)
+                d["output"] = output
+        except Exception as e:
+            logger.warning(f"Failed to generate presigned URL for output: {e}")
     return d
 
 
