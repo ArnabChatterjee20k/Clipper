@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 
+from unittest.mock import patch
+
 from modules.video_processor import (
     VideoBuilder,
     VideoInfo,
@@ -325,6 +327,133 @@ class TestExportBackgroundAudio:
         assert "amix=" in fc
         assert "0.3" in fc
 
+    def test_background_audio_mute_source_false_mixes_both(self, default_info):
+        """Default: source and background both play (weight 1 for source)."""
+        b = VideoBuilder("input.mp4").add_background_audio(
+            AudioOverlay(path="music.mp3", mix_volume=0.5, mute_source=False)
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        assert "amix=" in fc
+        # weights='1 0.5' = source at 1, background at 0.5
+        assert "weights='1 0.5'" in fc
+
+    def test_background_audio_mute_source_true_silences_source(self, default_info):
+        """mute_source=True: only background plays (weight 0 for source)."""
+        b = VideoBuilder("input.mp4").add_background_audio(
+            AudioOverlay(path="music.mp3", mix_volume=0.5, mute_source=True)
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        assert "amix=" in fc
+        # weights='0 0.5' = source muted, only background at 0.5
+        assert "weights='0 0.5'" in fc
+
+    def test_background_audio_mute_source_with_watermark(self, default_info):
+        """mute_source works when watermark is also present (extra input order)."""
+        b = (
+            VideoBuilder("input.mp4")
+            .add_watermark(WatermarkOverlay(path="logo.png"))
+            .add_background_audio(
+                AudioOverlay(path="music.mp3", mix_volume=0.7, mute_source=True)
+            )
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        assert "weights='0 0.7'" in fc
+
+    @patch("modules.video_processor._get_media_duration", return_value=60.0)
+    def test_background_audio_longer_extends_video_with_tpad(
+        self, mock_dur, default_info
+    ):
+        """When background audio (60s) is longer than video (30s), extend video with tpad."""
+        b = VideoBuilder("input.mp4").add_background_audio(
+            path="long_music.mp3", mix_volume=0.5
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        # Video is 30s, audio 60s → pad 30s with last frame
+        assert "tpad=" in fc
+        assert "stop_duration=30" in fc
+        assert "stop_mode=clone" in fc
+        assert "duration=longest" in fc
+
+    @patch("modules.video_processor._get_media_duration", return_value=60.0)
+    def test_background_audio_longer_extends_only_color_canvas(
+        self, mock_dur, default_info
+    ):
+        """When only_color and audio longer, color canvas uses extended duration."""
+        b = (
+            VideoBuilder("input.mp4")
+            .set_background_color(BackgroundColor(color="black", only_color=True))
+            .add_background_audio(path="long_music.mp3", mix_volume=0.5)
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        # Color filter d= should be 60 (audio length), not 30 (video)
+        assert "color=c=black" in fc
+        assert "d=60" in fc
+
+    @patch("modules.video_processor._get_media_duration", return_value=60.0)
+    def test_explicit_trim_respected_no_extend_when_audio_longer(
+        self, mock_dur, default_info
+    ):
+        """When trim is explicit (end_sec=40), do NOT extend video even if audio is 60s."""
+        b = (
+            VideoBuilder("input.mp4")
+            .trim(start_sec=0, end_sec=40)
+            .add_background_audio(path="long_music.mp3", mix_volume=0.5)
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        # No tpad (video stays 40s, not extended to 60s)
+        assert "tpad=" not in fc
+        # Mix is trimmed to 40s so audio plays for full trim duration (no silence at end)
+        assert "atrim=start=0:end=40" in fc
+
+    @patch("modules.video_processor._get_media_duration", return_value=60.0)
+    def test_mute_source_explicit_trim_uses_only_background_audio(
+        self, mock_dur, default_info
+    ):
+        """When mute_source + trim to 40s, use only background audio (no source). Plays full 40s."""
+        b = (
+            VideoBuilder("input.mp4")
+            .trim(start_sec=0, end_sec=40)
+            .add_background_audio(
+                AudioOverlay(path="long_music.mp3", mix_volume=0.5, mute_source=True)
+            )
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        # Uses only [1:a] (background), no amix with source
+        assert "[1:a]atrim=start=0:end=40" in fc
+        assert "volume=0.5" in fc
+
+    def test_only_color_mute_source_trim_no_unconnected_a_trim(self, default_info):
+        """only_color + mute_source + trim: must not create [a_trim] (causes unconnected output)."""
+        b = (
+            VideoBuilder("input.mp4")
+            .trim(start_sec=0, end_sec=40)
+            .set_background_color(BackgroundColor(color="black", only_color=True))
+            .add_background_audio(
+                AudioOverlay(path="music.mp3", mix_volume=0.5, mute_source=True)
+            )
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        # Must use only [1:a], no [0:a]atrim->[a_trim] (which would be orphaned)
+        assert "[1:a]atrim=start=0:end=40" in fc
+        # No amix (we use background only)
+        assert "amix=" not in fc
+
 
 # --- Export: background color ---
 
@@ -506,6 +635,38 @@ class TestExtractAudio:
         assert fc is not None
         assert "concat=" in fc
         assert "atempo" in fc
+
+
+# --- Builder load (JSON ops) ---
+
+
+class TestBuilderLoad:
+    def test_load_audio_with_mute_source(self, default_info):
+        """load() applies audio op with mute_source from JSON data."""
+        b = VideoBuilder("input.mp4").load(
+            "audio",
+            data={
+                "path": "bg.mp3",
+                "mix_volume": 0.4,
+                "loop": False,
+                "mute_source": True,
+            },
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        assert "weights='0 0.4'" in fc
+
+    def test_load_audio_without_mute_source_defaults_to_mix(self, default_info):
+        """load() with no mute_source mixes source + background (weight 1)."""
+        b = VideoBuilder("input.mp4").load(
+            "audio",
+            data={"path": "bg.mp3", "mix_volume": 0.8},
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        assert "weights='1 0.8'" in fc
 
 
 # --- Builder chaining ---

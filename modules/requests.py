@@ -77,6 +77,7 @@ class AudioOp(VideoEditOperation):
     path: Optional[str] = None
     mix_volume: float = 1.0
     loop: bool = False
+    mute_source: bool = False
     overlay: Optional[AudioOverlay] = None
 
     def get_data(self) -> Any:

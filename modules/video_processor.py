@@ -232,6 +232,7 @@ class AudioOverlay(BaseModel):
     path: str
     mix_volume: float = 1.0  # 0–1 relative to main audio
     loop: bool = False
+    mute_source: bool = False  # if True, silence source media audio and only play this
 
 
 class BackgroundColor(BaseModel):
@@ -451,6 +452,22 @@ def _drawtext_opts(
 
 def _resolve_end_sec(end_sec: float, duration: float) -> float:
     return duration if end_sec < 0 else end_sec
+
+
+def _get_media_duration(path: str) -> float:
+    """Get duration in seconds from any media file (video or audio). Returns 0 on error."""
+    cmd = get_cmd(
+        [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", path]
+    )
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=FFPROBE_TIMEOUT
+        )
+        data = json.loads(result.stdout)
+        fmt = data.get("format") or {}
+        return _safe_float(fmt.get("duration"), 0.0)
+    except Exception:
+        return 0.0
 
 
 def _ass_escape(text: str) -> str:
@@ -1078,34 +1095,55 @@ class VideoBuilder:
             if self._trim_start is not None
             else duration
         )
+        # When background audio is longer than video, extend output to match.
+        # Do NOT extend when trim was explicitly given (user set end_sec or duration).
+        trim_explicit = (
+            self._trim_end is not None and self._trim_end >= 0
+        ) or self._trim_duration is not None
+        output_duration = effective_duration
+        if self._background_audio is not None and not trim_explicit:
+            audio_dur = _get_media_duration(self._background_audio.path)
+            if audio_dur > 0 and audio_dur > effective_duration:
+                output_duration = audio_dur
 
         parts: list[str] = []
 
         # Solid background color only (no source video)
+        # When mute_source+trim_explicit we use only background audio; don't create unused [a_trim]
+        use_mute_source_only = (
+            self._background_audio is not None
+            and self._background_audio.mute_source
+            and trim_explicit
+        )
         if self._background_color is not None and self._background_color.only_color:
             c = self._background_color.color
-            parts.append(f"color=c={c}:s={w}x{h}:d={effective_duration}:r=30[bg]")
-            parts.append(
-                f"[0:a]atrim=start={self._trim_start or 0}:end={trim_end},asetpts=PTS-STARTPTS[a_trim]"
-            )
+            parts.append(f"color=c={c}:s={w}x{h}:d={output_duration}:r=30[bg]")
+            if not use_mute_source_only:
+                parts.append(
+                    f"[0:a]atrim=start={self._trim_start or 0}:end={trim_end},asetpts=PTS-STARTPTS[a_trim]"
+                )
+                audio_in = "[a_trim]"
+            else:
+                audio_in = (
+                    "[0:a]"  # Placeholder; background_audio block uses only [1:a]
+                )
             video_in = "[bg]"
-            audio_in = "[a_trim]"
         else:
             if (
                 self._background_color is not None
                 and not self._background_color.only_color
             ):
                 parts.append(
-                    f"color=c={self._background_color.color}:s={w}x{h}:d={effective_duration}:r=30[bg];"
+                    f"color=c={self._background_color.color}:s={w}x{h}:d={output_duration}:r=30[bg];"
                 )
 
             if self._trim_start is not None:
-                parts.append(
-                    f"[0:v]trim=start={self._trim_start}:end={trim_end},setpts=PTS-STARTPTS[v_trim];"
-                    f"[0:a]atrim=start={self._trim_start}:end={trim_end},asetpts=PTS-STARTPTS[a_trim]"
-                )
+                trim_v = f"[0:v]trim=start={self._trim_start}:end={trim_end},setpts=PTS-STARTPTS[v_trim]"
+                if not use_mute_source_only:
+                    trim_v += f";[0:a]atrim=start={self._trim_start}:end={trim_end},asetpts=PTS-STARTPTS[a_trim]"
+                parts.append(trim_v)
+                audio_in = "[a_trim]" if not use_mute_source_only else "[0:a]"
                 video_in = "[v_trim]"
-                audio_in = "[a_trim]"
 
         speed_segments = []
         for s in self._speed_segments:
@@ -1187,10 +1225,42 @@ class VideoBuilder:
             extra_inputs.append(self._background_audio.path)
             # Background audio input index: 1 if no watermark, 2 if watermark present
             audio_overlay_index = 1 + (1 if self._watermark is not None else 0)
+            mix_vol = self._background_audio.mix_volume
+
+            if self._background_audio.mute_source and trim_explicit:
+                # mute_source + explicit trim: use ONLY background audio, trimmed to output_duration.
+                # Source audio is ignored; avoids silence when source is shorter than trim.
+                parts.append(
+                    f"[{audio_overlay_index}:a]atrim=start=0:end={output_duration},"
+                    f"asetpts=PTS-STARTPTS,volume={mix_vol}[a_mix]"
+                )
+                audio_in = "[a_mix]"
+            else:
+                # Mix source + background. When trim_explicit: use longest then atrim to output_duration
+                # so background music plays for full trim length even if source audio is shorter.
+                src_weight = "0" if self._background_audio.mute_source else "1"
+                amix_duration = (
+                    "longest"  # always longest; we atrim to output_duration when needed
+                )
+                parts.append(
+                    f"{audio_in}[{audio_overlay_index}:a]amix=inputs=2:duration={amix_duration}:weights='{src_weight} {mix_vol}'[a_mix]"
+                )
+                audio_in = "[a_mix]"
+                if trim_explicit:
+                    parts.append(
+                        f"{audio_in}atrim=start=0:end={output_duration},asetpts=PTS-STARTPTS[a_trim_out]"
+                    )
+                    audio_in = "[a_trim_out]"
+
+        # Extend video when background audio is longer (pad with last frame)
+        if output_duration > effective_duration and not (
+            self._background_color is not None and self._background_color.only_color
+        ):
+            pad_sec = output_duration - effective_duration
             parts.append(
-                f"{audio_in}[{audio_overlay_index}:a]amix=inputs=2:duration=first:weights='1 {self._background_audio.mix_volume}'[a_mix]"
+                f"{video_in}tpad=stop_mode=clone:stop_duration={pad_sec:.2f}[v_pad]"
             )
-            audio_in = "[a_mix]"
+            video_in = "[v_pad]"
 
         # Video on solid color background (when set and not only_color)
         if self._background_color is not None and not self._background_color.only_color:
@@ -1548,6 +1618,8 @@ class VideoBuilder:
 
     def load(self, op: str, data: Any = None, **kwargs):
         """Apply one operation from standardized JSON: {"op": "...", "data": {...}} or data: [...]. No if/else."""
+        if op == "download_from_youtube":
+            return self
         spec = self.OPERATIONS.get(op)
         if not spec:
             raise ValueError(f"{op} is an unknown operation")

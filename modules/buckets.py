@@ -71,10 +71,6 @@ def get_url(filename: str, bucketname: str, upload=False):
         Params={"Bucket": bucketname, "Key": filename},
         ExpiresIn=7200,
     )
-    if not is_in_container:
-        s3_host = os.environ.get("CLIPPER_PUBLIC_S3_HOST")
-        s3_port = os.environ.get("CLIPPER_PUBLIC_S3_PORT")
-        return url.replace(f"{s3_host}:{s3_port}", f"localhost:{s3_port}")
     return url
 
 

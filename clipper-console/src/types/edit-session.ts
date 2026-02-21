@@ -103,6 +103,7 @@ export interface AudioOverlay {
   path: string;
   mix_volume?: number;
   loop?: boolean;
+  mute_source?: boolean;
 }
 
 export interface AudioOp {
@@ -110,6 +111,7 @@ export interface AudioOp {
   path?: string;
   mix_volume?: number;
   loop?: boolean;
+  mute_source?: boolean;
   overlay?: AudioOverlay;
 }
 
@@ -277,7 +279,8 @@ export const defaultAudioOp: AudioOp = {
   path: "",
   mix_volume: 1,
   loop: false,
-  overlay: { path: "", mix_volume: 1, loop: false },
+  mute_source: false,
+  overlay: { path: "", mix_volume: 1, loop: false, mute_source: false },
 };
 
 export const defaultBackgroundColorOp: BackgroundColorOp = {

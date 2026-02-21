@@ -127,6 +127,7 @@ class Worker:
             filename, presigned_url = await download_youtube_to_bucket(
                 youtube_url, opts, db=db
             )
+            presigned_url = presigned_url.replace("localhost", "minik")
             logger.info(
                 f"[Worker {self._id}] [Job {job.id}] [Workflow {job.uid}] "
                 f"Downloaded YouTube media to bucket as {filename} (url={presigned_url})"
@@ -147,13 +148,20 @@ class Worker:
                 ),
                 progress_callback=update_job_progress,
             )
+            extract_audio = False
             for operation in job.action:
                 op = operation.get("op")
                 data = operation.get("data")
                 if op == "download_from_youtube":
                     continue
+                if op == "extractAudio":
+                    extract_audio = True
+                    continue
                 builder = builder.load(op, data=data)
-            result = await builder.export_to_bytes()
+            if extract_audio:
+                result = await builder.extract_audio_to_bytes()
+            else:
+                result = await builder.export_to_bytes()
             full_filename = get_filename_from_url(input_url)
             base, _, ext = full_filename.rpartition(".")
             base = base or full_filename
@@ -161,16 +169,36 @@ class Worker:
             if not base or base == "":
                 base = "video"
 
-            if getattr(builder, "_gif_options", None) is not None:
+            if extract_audio:
+                audio_ext_map = {
+                    "libmp3lame": "mp3",
+                    "aac": "m4a",
+                    "pcm_s16le": "wav",
+                    "flac": "flac",
+                }
+                ext = audio_ext_map.get(getattr(builder, "_audio_format", ""), "mp3")
+            elif getattr(builder, "_gif_options", None) is not None:
                 ext = "gif"
             elif not ext or ext == "":
                 ext = "mp4"
 
-            valid_extensions = ["mp4", "webm", "mkv", "mp3", "m4a", "gif", "mov", "avi"]
+            valid_extensions = [
+                "mp4",
+                "webm",
+                "mkv",
+                "mp3",
+                "m4a",
+                "wav",
+                "flac",
+                "gif",
+                "mov",
+                "avi",
+            ]
             if ext.lower() not in valid_extensions:
                 ext = "mp4"
 
-            output_filename = f"{base}_output_{job.uid}_{job.output_version}.{ext}"
+            suffix = "audio" if extract_audio else "output"
+            output_filename = f"{base}_{suffix}_{job.uid}_{job.output_version}.{ext}"
         try:
             async with db.transaction():
                 sql = f"""

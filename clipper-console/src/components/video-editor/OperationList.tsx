@@ -119,7 +119,7 @@ export function OperationList({
       text: addText ?? (() => onAdd({ op: "text", segment: [{ start_sec: 0, end_sec: -1, text: "" }] })),
       speed: addSpeed ? () => addSpeed(1) : () => onAdd({ op: "speed", segment: [{ start_sec: 0, end_sec: -1, speed: 1 }] }),
       watermark: addWatermark ?? (() => onAdd({ op: "watermark", overlay: { path: "", position: "(W-w)/2:H-h-80", opacity: 0.7 } })),
-      audio: addAudio ?? (() => onAdd({ op: "audio", path: "", mix_volume: 1, loop: false, overlay: { path: "", mix_volume: 1, loop: false } })),
+      audio: addAudio ?? (() => onAdd({ op: "audio", path: "", mix_volume: 1, loop: false, mute_source: false, overlay: { path: "", mix_volume: 1, loop: false, mute_source: false } })),
       backgroundColor: addBackgroundColor ?? (() => onAdd({ op: "backgroundColor", overlay: { color: "black", only_color: false } })),
       transcode: addTranscode ?? (() => onAdd({ op: "transcode", codec: "libx264", preset: "medium", crf: 23, audio_codec: "aac" })),
       compress: addCompress ?? (() => onAdd({ op: "compress", preset: "medium" })),

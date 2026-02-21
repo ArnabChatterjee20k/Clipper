@@ -1,4 +1,4 @@
-import io, asyncio, json
+import io, asyncio, json, os
 from datetime import datetime
 from uuid import uuid4, UUID
 from typing import Annotated, Optional
@@ -154,8 +154,6 @@ async def edit_video(edit: VideoEditRequest, db: DBSession):
     builder = VideoBuilder(edit.media)
     # validating first then enqueueing
     for operation in edit.operations:
-        if operation == "download_from_youtube":
-            pass
         builder = builder.load(operation.op, data=operation.get_data())
     actions = [{"op": o.op, "data": o.get_data()} for o in edit.operations]
     await Worker.enqueue(
@@ -182,12 +180,19 @@ def _job_row_to_kwargs(row) -> dict:
             except (ValueError, TypeError):
                 pass
     output = d.get("output")
+    env_mode = os.getenv("CLIPPER_ENV", "dev").lower()
+    is_in_container = env_mode == "production"
     if isinstance(output, dict) and output.get("filename"):
         try:
             filename = output.get("filename")
             if filename:
-                output["url"] = get_url(str(filename), PRIMARY_BUCKET)
+                url = get_url(str(filename), PRIMARY_BUCKET)
                 d["output"] = output
+                if not is_in_container:
+                    s3_host = os.environ.get("CLIPPER_PUBLIC_S3_HOST")
+                    s3_port = os.environ.get("CLIPPER_PUBLIC_S3_PORT")
+                    url = url.replace(f"{s3_host}:{s3_port}", f"localhost:{s3_port}")
+                output["url"] = url
         except Exception as e:
             logger.warning(f"Failed to generate presigned URL for output: {e}")
     return d
@@ -430,8 +435,6 @@ async def create_workflow(db: DBSession, workflow: VideoWorkflowCreateRequest):
         builder = VideoBuilder("")
         # validation
         for operation in step:
-            if operation == "download_from_youtube":
-                pass
             builder = builder.load(operation.op, data=operation.get_data())
 
     workflow_id = await create(db, "workflows", **workflow.model_dump())
@@ -455,8 +458,6 @@ async def update_workflow(workflow_id: int, body: WorkflowUpdateRequest, db: DBS
             for op_dict in step:
                 op = op_dict.get("op")
                 data = {k: v for k, v in op_dict.items() if k != "op"}
-                if op == "download_from_youtube":
-                    pass
                 builder = builder.load(op, data=data)
     updated = await db_update(db, "workflows", set_values, id=workflow_id)
     return _workflow_row_to_response(updated[0])

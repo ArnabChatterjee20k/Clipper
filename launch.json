@@ -1,0 +1,206 @@
+{
+  "media": "http://minik:9000/primary/youtube_f82c97b6c3b24bf49eb2a3c4b8914782_youtube_download_30885_1771347957767_5ccb748a_output_f0f1dc57-5926-448c-a11c-f1f39dd19b78_0.mp4?AWSAccessKeyId=minio-root-user&Signature=U2deDFI2y3limT4GiMlVfMrD664%3D&Expires=1771685729",
+  "operations": [
+    {
+      "op": "backgroundColor",
+      "overlay": {
+        "color": "black",
+        "only_color": true
+      }
+    },
+    {
+      "op": "audio",
+      "path": "http://minik:9000/primary/youtube_34b2e0aed8d2404f9456517c7cecd982_youtube_download_61567_1771677315022_abe66cb3_audio_7c41bc17-1552-405f-8d62-4c61d0c06827_0.mp3?AWSAccessKeyId=minio-root-user&Signature=3yD1ktZXbwZngfvy3w15mfKoRpo%3D&Expires=1771685731",
+      "mix_volume": 0.5,
+      "mute_source": true
+    },
+    {
+      "op": "textSequence",
+      "items": [
+        {
+          "text": "Editing videos is slow.",
+          "start_sec": 0.0,
+          "end_sec": 1.5,
+          "fontsize": 52,
+          "fontcolor": "white",
+          "fade_in_ms": 300,
+          "fade_out_ms": 300
+        },
+        {
+          "text": "Cloud editors leak privacy.",
+          "start_sec": 1.5,
+          "end_sec": 3.0,
+          "fontsize": 52,
+          "fontcolor": "white",
+          "fade_in_ms": 300,
+          "fade_out_ms": 300
+        },
+        {
+          "text": "Rendering takes forever.",
+          "start_sec": 3.0,
+          "end_sec": 4.5,
+          "fontsize": 52,
+          "fontcolor": "white",
+          "fade_in_ms": 300,
+          "fade_out_ms": 300
+        }
+      ]
+    },
+    {
+      "op": "textSequence",
+      "items": [
+        {
+          "text": "Uploading...",
+          "start_sec": 4.5,
+          "end_sec": 5.2,
+          "fontsize": 48,
+          "fontcolor": "white",
+          "fade_in_ms": 150,
+          "fade_out_ms": 150
+        },
+        {
+          "text": "Waiting...",
+          "start_sec": 5.2,
+          "end_sec": 5.9,
+          "fontsize": 48,
+          "fontcolor": "white",
+          "fade_in_ms": 150,
+          "fade_out_ms": 150
+        },
+        {
+          "text": "Rendering...",
+          "start_sec": 5.9,
+          "end_sec": 6.6,
+          "fontsize": 48,
+          "fontcolor": "white",
+          "fade_in_ms": 150,
+          "fade_out_ms": 150
+        },
+        {
+          "text": "Retrying...",
+          "start_sec": 6.6,
+          "end_sec": 7.3,
+          "fontsize": 48,
+          "fontcolor": "white",
+          "fade_in_ms": 150,
+          "fade_out_ms": 150
+        }
+      ]
+    },
+    {
+      "op": "textSequence",
+      "items": [
+        {
+          "text": "Meet Clipper.",
+          "start_sec": 10.0,
+          "end_sec": 12.5,
+          "fontsize": 72,
+          "fontcolor": "white",
+          "fade_in_ms": 400,
+          "fade_out_ms": 400
+        },
+        {
+          "text": "Your Local AI Video Editor.",
+          "start_sec": 12.5,
+          "end_sec": 15.0,
+          "fontsize": 64,
+          "fontcolor": "white",
+          "fade_in_ms": 400,
+          "fade_out_ms": 400
+        }
+      ]
+    },
+    {
+      "op": "textSequence",
+      "items": [
+        {
+          "text": "Edit locally",
+          "start_sec": 15.0,
+          "end_sec": 17.0,
+          "fontsize": 56,
+          "fontcolor": "white",
+          "fade_in_ms": 200,
+          "fade_out_ms": 200
+        },
+        {
+          "text": "Instant rendering",
+          "start_sec": 17.0,
+          "end_sec": 19.0,
+          "fontsize": 56,
+          "fontcolor": "white",
+          "fade_in_ms": 200,
+          "fade_out_ms": 200
+        },
+        {
+          "text": "Programmable video pipelines",
+          "start_sec": 19.0,
+          "end_sec": 21.5,
+          "fontsize": 56,
+          "fontcolor": "white",
+          "fade_in_ms": 200,
+          "fade_out_ms": 200
+        },
+        {
+          "text": "Privacy-first",
+          "start_sec": 21.5,
+          "end_sec": 23.5,
+          "fontsize": 56,
+          "fontcolor": "white",
+          "fade_in_ms": 200,
+          "fade_out_ms": 200
+        },
+        {
+          "text": "Full control over your media",
+          "start_sec": 23.5,
+          "end_sec": 26.0,
+          "fontsize": 56,
+          "fontcolor": "white",
+          "fade_in_ms": 200,
+          "fade_out_ms": 200
+        }
+      ]
+    },
+    {
+      "op": "karaoke",
+      "sentence": "Create videos at the speed of thought.",
+      "start_sec": 28.0,
+      "end_sec": 35.0,
+      "fontsize": 60,
+      "fontcolor": "white",
+      "highlight_fontcolor": "yellow"
+    },
+    {
+      "op": "textSequence",
+      "items": [
+        {
+          "text": "Clipper",
+          "start_sec": 35.0,
+          "end_sec": 37.0,
+          "fontsize": 64,
+          "fontcolor": "white",
+          "fade_in_ms": 300,
+          "fade_out_ms": 300
+        },
+        {
+          "text": "Edit. Generate. Ship.",
+          "start_sec": 37.0,
+          "end_sec": 40.0,
+          "fontsize": 52,
+          "fontcolor": "white",
+          "fade_in_ms": 300,
+          "fade_out_ms": 300
+        }
+      ]
+    },
+    {
+      "op": "compress",
+      "target_size_mb": 5,
+      "preset": "medium"
+    },
+    {
+      "op": "trim",
+      "start_sec": 0,
+      "end_sec": 40
+    }
+  ]
+}

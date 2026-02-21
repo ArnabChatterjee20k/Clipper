@@ -1030,7 +1030,7 @@ function WatermarkEditor({ op, onChange }: { op: WatermarkOp; onChange: (op: Wat
 }
 
 function AudioEditor({ op, onChange }: { op: AudioOp; onChange: (op: AudioOp) => void }) {
-  const o = op.overlay ?? { path: "", mix_volume: 1, loop: false };
+  const o = op.overlay ?? { path: "", mix_volume: 1, loop: false, mute_source: false };
   return (
     <div className="space-y-2">
       <div className="space-y-1">
@@ -1065,6 +1065,16 @@ function AudioEditor({ op, onChange }: { op: AudioOp; onChange: (op: AudioOp) =>
           />
           <Label htmlFor="audio-loop" className="text-xs">Loop</Label>
         </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="audio-mute-source"
+          checked={o.mute_source ?? false}
+          onChange={(e) => onChange({ ...op, overlay: { ...o, mute_source: e.target.checked } })}
+          className="rounded border-input"
+        />
+        <Label htmlFor="audio-mute-source" className="text-xs">Mute source media (only play this audio)</Label>
       </div>
     </div>
   );
