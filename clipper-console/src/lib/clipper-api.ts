@@ -82,6 +82,8 @@ export interface EditVideoResult {
 /** Operation steps (discriminated by op) - minimal for API */
 export type VideoOperation =
   | { op: "trim"; start_sec?: number; end_sec?: number; duration?: number }
+  | { op: "karaoke"; [k: string]: unknown }
+  | { op: "textSequence"; [k: string]: unknown }
   | { op: "text"; segment: Array<{ start_sec?: number; end_sec?: number; text: string }> }
   | { op: "speed"; segment: Array<{ start_sec?: number; end_sec?: number; speed: number }> }
   | { op: string; [k: string]: unknown };

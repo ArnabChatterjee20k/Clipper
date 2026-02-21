@@ -229,6 +229,7 @@ class Worker:
             logger.error(
                 f"[Worker {self._id}] [Job {job.id or ''}] [Workflow {job.uid or ''}] [ERROR OUTPUT UPLOAD] Error {e}"
             )
+            await self.error(job, str(e))
 
     async def stop(self):
         self._running = False

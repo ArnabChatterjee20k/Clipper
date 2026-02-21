@@ -1,29 +1,31 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-</head>
+<html>
 <body>
-    
+
+<video controls width="640">
+  <source
+    src="http://localhost:9000/primary/BigBuckBunny.mp4?AWSAccessKeyId=minio-root-user&Signature=7eDeEOi9efljJAQWDV%2B2MlQfiQc%3D&Expires=1771666974"
+    type="video/mp4">
+</video>
+
 </body>
+</html>
 <script>
 
-    const uid = "a88dc20f-7156-4cb9-b3ca-54f0ecbd802b";
+//     const uid = "a88dc20f-7156-4cb9-b3ca-54f0ecbd802b";
 
-const source = new EventSource(`http://127.0.0.1:8000/edits/status?uid=${uid}`);
+// const source = new EventSource(`http://127.0.0.1:8000/edits/status?uid=${uid}`);
 
-source.addEventListener("job_update", (event) => {
-  const job = JSON.parse(event.data);
-  console.log("Job updated:", job);
+// source.addEventListener("job_update", (event) => {
+//   const job = JSON.parse(event.data);
+//   console.log("Job updated:", job);
 
-});
+// });
 
-source.onerror = (err) => {
-  console.error("SSE error:", err);
-  source.close();
-};
+// source.onerror = (err) => {
+//   console.error("SSE error:", err);
+//   source.close();
+// };
 
 
 </script>

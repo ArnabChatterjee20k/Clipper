@@ -7,6 +7,8 @@ import { useState, useCallback, useMemo } from "react";
 import type { VideoOperation, VideoEditRequest } from "@/types/edit-session";
 import {
   defaultTrimOp,
+  defaultKaraokeOp,
+  defaultTextSequenceOp,
   defaultTextSegment,
   defaultSpeedOp,
   defaultWatermarkOp,
@@ -94,6 +96,8 @@ export function useEditSession() {
     canSubmit,
     /** Helpers that add with defaults */
     addTrim: () => addOperation(defaultTrimOp),
+    addKaraoke: () => addOperation(defaultKaraokeOp),
+    addTextSequence: () => addOperation(defaultTextSequenceOp),
     addText: () => addOperation({ op: "text", segment: [defaultTextSegment()] }),
     addSpeed: (speed = 1) => addOperation(defaultSpeedOp(speed)),
     addWatermark: () => addOperation(defaultWatermarkOp),

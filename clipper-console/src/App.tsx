@@ -4,6 +4,7 @@ import { VideoEditView } from "@/components/video-editor";
 import { BucketsPage } from "@/pages/BucketsPage";
 import { EditsPage } from "@/pages/EditsPage";
 import { WorkflowsPage } from "@/pages/WorkflowsPage";
+import { ApiPage } from "@/pages/ApiPage";
 import { ToastProvider } from "@/components/ui/toast";
 import "./App.css";
 
@@ -18,6 +19,7 @@ function App() {
             <Route path="edit" element={<VideoEditView />} />
             <Route path="edits" element={<EditsPage />} />
             <Route path="workflows" element={<WorkflowsPage />} />
+            <Route path="api" element={<ApiPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

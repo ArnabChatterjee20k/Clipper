@@ -1,12 +1,13 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { FolderOpen, Scissors, ListTodo, GitBranch } from "lucide-react";
+import { FolderOpen, Scissors, ListTodo, GitBranch, Braces } from "lucide-react";
 
 const nav = [
   { to: "/buckets", label: "Buckets", icon: FolderOpen },
   { to: "/edit", label: "Edit", icon: Scissors },
   { to: "/edits", label: "Edits", icon: ListTodo },
   { to: "/workflows", label: "Workflows", icon: GitBranch },
+  { to: "/api", label: "API", icon: Braces },
 ];
 
 export function Layout() {

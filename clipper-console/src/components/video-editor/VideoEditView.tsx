@@ -27,6 +27,8 @@ export function VideoEditView() {
     toRequest,
     canSubmit,
     addTrim,
+    addKaraoke,
+    addTextSequence,
     addText,
     addSpeed,
     addWatermark,
@@ -82,6 +84,8 @@ export function VideoEditView() {
                   onRemove={removeOperation}
                   onUpdate={updateOperation}
                   addTrim={addTrim}
+                  addKaraoke={addKaraoke}
+                  addTextSequence={addTextSequence}
                   addText={addText}
                   addSpeed={addSpeed}
                   addWatermark={addWatermark}

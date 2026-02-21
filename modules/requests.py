@@ -3,6 +3,8 @@ from typing import List, Optional, Literal, Union, Annotated, Any, Self
 from .video_processor import (
     WatermarkOverlay,
     TextSegment,
+    WordTiming,
+    TimedText,
     SpeedSegment,
     AudioOverlay,
     BackgroundColor,
@@ -137,6 +139,28 @@ class GifOp(VideoEditOperation):
     output_codec: str = "gif"
 
 
+class KaraokeOp(VideoEditOperation):
+    op: Literal["karaoke"]
+    sentence: str
+    start_sec: Optional[float] = None
+    end_sec: Optional[float] = None
+    words: Optional[list[WordTiming]] = None
+    fontsize: int = 60
+    x: str = "(w-text_w)/2"
+    y: str = "h-200"
+    fontcolor: str = "white"
+    highlight_fontcolor: Optional[str] = None
+    boxcolor: str = "black@1.0"
+    boxborderw: int = 12
+    letter_width: Optional[float] = None
+    space_width: Optional[float] = None
+
+
+class TextSequenceOp(VideoEditOperation):
+    op: Literal["textSequence"]
+    items: list[TimedText]
+
+
 class DownloadFromYouTubeOp(VideoEditOperation):
     op: Literal["download_from_youtube"]
     quality: Optional[str] = "best"
@@ -154,6 +178,8 @@ class DownloadFromYouTubeOp(VideoEditOperation):
 VideoOperationStep = Annotated[
     Union[
         TrimOp,
+        KaraokeOp,
+        TextSequenceOp,
         TextOp,
         SpeedOp,
         WatermarkOp,

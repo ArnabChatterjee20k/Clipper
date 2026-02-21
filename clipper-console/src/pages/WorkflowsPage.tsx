@@ -19,6 +19,8 @@ import {
 import type { VideoOperation } from "@/types/edit-session";
 import {
   defaultTrimOp,
+  defaultKaraokeOp,
+  defaultTextSequenceOp,
   defaultTextSegment,
   defaultSpeedOp,
   defaultWatermarkOp,
@@ -1015,6 +1017,8 @@ function WorkflowStepEditor({
       onRemove={removeOp}
       onUpdate={updateOp}
       addTrim={() => addOp(defaultTrimOp)}
+      addKaraoke={() => addOp(defaultKaraokeOp)}
+      addTextSequence={() => addOp(defaultTextSequenceOp)}
       addText={() => addOp({ op: "text", segment: [defaultTextSegment()] })}
       addSpeed={(speed = 1) => addOp(defaultSpeedOp(speed))}
       addWatermark={() => addOp(defaultWatermarkOp)}

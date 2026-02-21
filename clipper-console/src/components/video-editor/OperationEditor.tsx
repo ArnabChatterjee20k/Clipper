@@ -5,6 +5,9 @@
 import type {
   VideoOperation,
   TrimOp,
+  KaraokeOp,
+  TextSequenceOp,
+  TimedTextItem,
   TextOp,
   TextSegment,
   SpeedOp,
@@ -47,6 +50,8 @@ export interface OperationEditorProps {
 
 const OP_LABELS: Record<string, string> = {
   trim: "Trim",
+  karaoke: "Karaoke highlight",
+  textSequence: "Text sequence (fade)",
   text: "Text overlay",
   speed: "Speed",
   watermark: "Watermark",
@@ -66,13 +71,15 @@ export function OperationEditor({ operation, onChange, onRemove, variant = "card
   const content = (
     <>
       {operation.op === "trim" && <TrimEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "text" && <TextEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "speed" && <SpeedEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "watermark" && <WatermarkEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "audio" && <AudioEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "backgroundColor" && <BackgroundColorEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "transcode" && <TranscodeEditor op={operation} onChange={(op) => onChange(op)} />}
-        {operation.op === "compress" && <CompressEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "karaoke" && <KaraokeEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "textSequence" && <TextSequenceEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "text" && <TextEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "speed" && <SpeedEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "watermark" && <WatermarkEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "audio" && <AudioEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "backgroundColor" && <BackgroundColorEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "transcode" && <TranscodeEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "compress" && <CompressEditor op={operation} onChange={(op) => onChange(op)} />}
       {operation.op === "concat" && <ConcatEditor op={operation} onChange={(op) => onChange(op)} />}
       {operation.op === "extractAudio" && <p className="text-xs text-muted-foreground">Extract audio track only. No options.</p>}
       {operation.op === "gif" && <GifEditor op={operation} onChange={(op) => onChange(op)} />}
@@ -142,6 +149,391 @@ function TrimEditor({ op, onChange }: { op: TrimOp; onChange: (op: TrimOp) => vo
           className="h-8"
         />
       </div>
+    </div>
+  );
+}
+
+function KaraokeEditor({ op, onChange }: { op: KaraokeOp; onChange: (op: KaraokeOp) => void }) {
+  const positionKey =
+    (Object.entries(TEXT_POSITIONS).find(
+      ([_, p]) => p.x === (op.x ?? "(w-text_w)/2") && p.y === (op.y ?? "h-200")
+    )?.[0]) ?? CUSTOM_POSITION_KEY;
+  const hasHighlightBackground = Boolean(op.boxcolor);
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <Label className="text-xs">Sentence</Label>
+        <Input
+          value={op.sentence}
+          onChange={(e) => onChange({ ...op, sentence: e.target.value })}
+          placeholder="Type the sentence to animate"
+          className="h-8"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Start (s)</Label>
+          <Input
+            type="number"
+            min={0}
+            step={0.1}
+            value={op.start_sec ?? 0}
+            onChange={(e) => onChange({ ...op, start_sec: Number(e.target.value) || 0 })}
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">End (s)</Label>
+          <Input
+            type="number"
+            min={0}
+            step={0.1}
+            value={op.end_sec ?? 0}
+            onChange={(e) => onChange({ ...op, end_sec: Number(e.target.value) || 0 })}
+            className="h-8"
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Font size</Label>
+          <Input
+            type="number"
+            min={8}
+            max={120}
+            value={op.fontsize ?? 60}
+            onChange={(e) => onChange({ ...op, fontsize: Number(e.target.value) || 60 })}
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Position</Label>
+          <select
+            className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+            value={positionKey}
+            onChange={(e) => {
+              const key = e.target.value;
+              if (key === CUSTOM_POSITION_KEY) return;
+              const pos = TEXT_POSITIONS[key];
+              if (pos) onChange({ ...op, x: pos.x, y: pos.y });
+            }}
+          >
+            {Object.entries(TEXT_POSITIONS).map(([key]) => (
+              <option key={key} value={key}>
+                {TEXT_POSITION_LABELS[key] ?? key}
+              </option>
+            ))}
+            <option value={CUSTOM_POSITION_KEY}>Custom</option>
+          </select>
+        </div>
+      </div>
+      {positionKey === CUSTOM_POSITION_KEY && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">X expression</Label>
+            <Input
+              value={op.x ?? "(w-text_w)/2"}
+              onChange={(e) => onChange({ ...op, x: e.target.value })}
+              placeholder="(w-text_w)/2"
+              className="h-8"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Y expression</Label>
+            <Input
+              value={op.y ?? "h-200"}
+              onChange={(e) => onChange({ ...op, y: e.target.value })}
+              placeholder="h-200"
+              className="h-8"
+            />
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Text color</Label>
+          <Input
+            value={op.fontcolor ?? "white"}
+            onChange={(e) => onChange({ ...op, fontcolor: e.target.value })}
+            placeholder="white or #FFFFFF"
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Highlight text color</Label>
+          <Input
+            value={op.highlight_fontcolor ?? "yellow"}
+            onChange={(e) => {
+              const next = e.target.value.trim();
+              onChange({ ...op, highlight_fontcolor: next === "" ? undefined : next });
+            }}
+            placeholder="yellow or #FFEB3B"
+            className="h-8"
+          />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs">Highlight background color</Label>
+          <Input
+            value={op.boxcolor ?? ""}
+            onChange={(e) => {
+              const next = e.target.value.trim();
+              onChange({ ...op, boxcolor: next === "" ? undefined : next });
+            }}
+            placeholder="black@1.0"
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Background padding</Label>
+          <Input
+            type="number"
+            min={0}
+            step={1}
+            value={op.boxborderw ?? 0}
+            onChange={(e) => onChange({ ...op, boxborderw: Number(e.target.value) || 0 })}
+            className="h-8"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={hasHighlightBackground}
+          onChange={(e) => {
+            if (e.target.checked) {
+              onChange({
+                ...op,
+                boxcolor: op.boxcolor && op.boxcolor.trim() ? op.boxcolor : "black@1.0",
+                boxborderw: op.boxborderw ?? 12,
+              });
+            } else {
+              onChange({ ...op, boxcolor: undefined });
+            }
+          }}
+          aria-label="Enable highlight background"
+          className="rounded border-input"
+        />
+        <Label className="text-xs">
+          Enable highlight background
+        </Label>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Word timing is auto-distributed between start and end.
+      </p>
+    </div>
+  );
+}
+
+function TextSequenceEditor({ op, onChange }: { op: TextSequenceOp; onChange: (op: TextSequenceOp) => void }) {
+  const items = op.items?.length ? op.items : [{
+    text: "First line",
+    start_sec: 0,
+    end_sec: 2,
+    fontsize: 60,
+    x: "(w-text_w)/2",
+    y: "h-200",
+    fontcolor: "white",
+    background: false,
+    boxcolor: "black@1.0",
+    boxborderw: 12,
+    fade_in_ms: 200,
+    fade_out_ms: 200,
+  }];
+
+  const updateItem = (index: number, patch: Partial<TimedTextItem>) => {
+    const next = items.map((s, i) => (i === index ? { ...s, ...patch } : s));
+    onChange({ ...op, items: next });
+  };
+  const addItem = () => {
+    onChange({
+      ...op,
+      items: [
+        ...items,
+        {
+          text: "Next line",
+          start_sec: 0,
+          end_sec: 2,
+          fontsize: 60,
+          x: "(w-text_w)/2",
+          y: "h-200",
+          fontcolor: "white",
+          background: false,
+          boxcolor: "black@1.0",
+          boxborderw: 12,
+          fade_in_ms: 200,
+          fade_out_ms: 200,
+        },
+      ],
+    });
+  };
+  const removeItem = (index: number) => {
+    if (items.length <= 1) return;
+    const next = items.filter((_, i) => i !== index);
+    onChange({ ...op, items: next });
+  };
+
+  return (
+    <div className="space-y-3">
+      {items.map((item, index) => (
+        <div key={index} className="rounded-lg border border-border/60 bg-muted/30 p-2 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Item {index + 1}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => removeItem(index)}
+              disabled={items.length <= 1}
+              aria-label="Remove item"
+            >
+              <Trash2 className="size-3.5 text-muted-foreground" />
+            </Button>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Text</Label>
+            <Input
+              value={item.text}
+              onChange={(e) => updateItem(index, { text: e.target.value })}
+              placeholder="Overlay text"
+              className="h-8"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Start (s)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.1}
+                value={item.start_sec ?? 0}
+                onChange={(e) => updateItem(index, { start_sec: Number(e.target.value) || 0 })}
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">End (s)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.1}
+                value={item.end_sec ?? 0}
+                onChange={(e) => updateItem(index, { end_sec: Number(e.target.value) || 0 })}
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Fade in (ms)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={50}
+                value={item.fade_in_ms ?? 0}
+                onChange={(e) => updateItem(index, { fade_in_ms: Number(e.target.value) || 0 })}
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Fade out (ms)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={50}
+                value={item.fade_out_ms ?? 0}
+                onChange={(e) => updateItem(index, { fade_out_ms: Number(e.target.value) || 0 })}
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Font size</Label>
+              <Input
+                type="number"
+                min={8}
+                max={120}
+                value={item.fontsize ?? 60}
+                onChange={(e) => updateItem(index, { fontsize: Number(e.target.value) || 60 })}
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Position</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                value={
+                  (Object.entries(TEXT_POSITIONS).find(
+                    ([_, p]) => p.x === (item.x ?? "(w-text_w)/2") && p.y === (item.y ?? "h-200")
+                  )?.[0]) ?? CUSTOM_POSITION_KEY
+                }
+                onChange={(e) => {
+                  const key = e.target.value;
+                  if (key === CUSTOM_POSITION_KEY) return;
+                  const pos = TEXT_POSITIONS[key];
+                  if (pos) updateItem(index, { x: pos.x, y: pos.y });
+                }}
+              >
+                {Object.entries(TEXT_POSITIONS).map(([key]) => (
+                  <option key={key} value={key}>
+                    {TEXT_POSITION_LABELS[key] ?? key}
+                  </option>
+                ))}
+                <option value={CUSTOM_POSITION_KEY}>Custom</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Font color</Label>
+              <Input
+                value={item.fontcolor ?? "white"}
+                onChange={(e) => updateItem(index, { fontcolor: e.target.value })}
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Box color</Label>
+              <Input
+                value={item.boxcolor ?? "black@1.0"}
+                onChange={(e) => updateItem(index, { boxcolor: e.target.value })}
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Box padding</Label>
+              <Input
+                type="number"
+                min={0}
+                step={1}
+                value={item.boxborderw ?? 0}
+                onChange={(e) => updateItem(index, { boxborderw: Number(e.target.value) || 0 })}
+                className="h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Background</Label>
+              <select
+                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+                value={item.background ? "yes" : "no"}
+                onChange={(e) => updateItem(index, { background: e.target.value === "yes" })}
+              >
+                <option value="no">Off</option>
+                <option value="yes">On</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={addItem}>
+        <Plus className="size-3.5 mr-1" />
+        Add item
+      </Button>
     </div>
   );
 }

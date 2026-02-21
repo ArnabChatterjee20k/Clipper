@@ -1,10 +1,10 @@
 # For easy reference and getting the processor idea check the scripts/ffmpeg.py file
-import json, subprocess, re, os
+import json, subprocess, re, os, uuid
 import asyncio
 from datetime import datetime
 from typing import Optional, Protocol, AsyncGenerator, Any, Union, Type
 from dataclasses import dataclass
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from .logger import logger
 from datetime import datetime
 from enum import Enum
@@ -96,6 +96,58 @@ class TextSegment(BaseModel):
     boxcolor: Optional[str] = None
     boxborderw: Optional[int] = None
     background: Optional[bool] = None
+
+
+class WordTiming(BaseModel):
+    word: str
+    start_sec: float
+    end_sec: float
+
+
+class KaraokeText(BaseModel):
+    sentence: str
+    start_sec: Optional[float] = None
+    end_sec: Optional[float] = None
+    words: Optional[list[WordTiming]] = None
+    fontsize: int = 60
+    x: str = "(w-text_w)/2"
+    y: str = "h-200"
+    fontcolor: str = "white"
+    highlight_fontcolor: Optional[str] = None
+    boxcolor: str = "black@1.0"
+    boxborderw: int = 12
+    letter_width: Optional[float] = None
+    space_width: Optional[float] = None
+
+
+class TimedText(BaseModel):
+    text: str
+    start_sec: float
+    end_sec: float
+    fontsize: int = 60
+    x: str = "(w-text_w)/2"
+    y: str = "h-200"
+    fontcolor: str = "white"
+    boxcolor: Optional[str] = None
+    boxborderw: int = 0
+    background: bool = False
+    fade_in_ms: int = 200
+    fade_out_ms: int = 200
+
+
+class TextSequence(BaseModel):
+    items: list[TimedText]
+
+    @model_validator(mode="after")
+    def _validate_text_sequence(self) -> "TextSequence":
+        if not self.items:
+            raise ValueError("textSequence requires at least one item")
+        for item in self.items:
+            if item.end_sec <= item.start_sec:
+                raise ValueError(
+                    "textSequence item end_sec must be greater than start_sec"
+                )
+        return self
 
 
 class SpeedSegment(BaseModel):
@@ -401,6 +453,135 @@ def _resolve_end_sec(end_sec: float, duration: float) -> float:
     return duration if end_sec < 0 else end_sec
 
 
+def _ass_escape(text: str) -> str:
+    return text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}")
+
+
+def _ass_color(color: Optional[str], default_rgb: str = "FFFFFF") -> str:
+    if not color:
+        rgb = default_rgb
+        alpha = 1.0
+    else:
+        parts = color.split("@", 1)
+        rgb_part = parts[0].strip()
+        alpha = 1.0
+        if len(parts) == 2:
+            try:
+                alpha = float(parts[1])
+            except ValueError:
+                alpha = 1.0
+        named = {
+            "black": "000000",
+            "white": "FFFFFF",
+            "red": "FF0000",
+            "green": "00FF00",
+            "blue": "0000FF",
+            "yellow": "FFFF00",
+            "cyan": "00FFFF",
+            "magenta": "FF00FF",
+        }
+        if rgb_part.lower() in named:
+            rgb = named[rgb_part.lower()]
+        else:
+            hex_part = rgb_part.lower().replace("#", "").replace("0x", "")
+            rgb = hex_part if len(hex_part) == 6 else default_rgb
+
+    alpha = max(0.0, min(1.0, alpha))
+    ass_alpha = int(round((1.0 - alpha) * 255))
+    rr, gg, bb = rgb[0:2], rgb[2:4], rgb[4:6]
+    return f"&H{ass_alpha:02X}{bb}{gg}{rr}&"
+
+
+def _ass_time(sec: float) -> str:
+    if sec < 0:
+        sec = 0
+    h = int(sec // 3600)
+    m = int((sec % 3600) // 60)
+    s = sec % 60
+    cs = int(round((s - int(s)) * 100))
+    return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
+
+
+def _ass_alignment_and_margins(x: str, y: str) -> tuple[int, int, int, int]:
+    align = 2
+    margin_l = 20
+    margin_r = 20
+    margin_v = 200
+
+    x_norm = (x or "").strip()
+    y_norm = (y or "").strip()
+
+    if x_norm in ("10", "20"):
+        align = 1 if align in (2, 3) else 7
+        margin_l = int(float(x_norm))
+    elif x_norm in ("W-w-10", "w-text_w-10", "W-w-20", "w-text_w-20"):
+        align = 3 if align in (2, 3) else 9
+        margin_r = int(float(re.sub(r"[^\d.]", "", x_norm)) or 10)
+    elif x_norm == "(w-text_w)/2":
+        align = 2 if align in (1, 2, 3) else 8
+
+    m = re.match(r"^h-(\d+(?:\.\d+)?)$", y_norm)
+    if m:
+        align = 2 if align in (1, 2, 3) else 8
+        margin_v = int(float(m.group(1)))
+    elif y_norm in ("10", "20"):
+        align = 8
+        margin_v = int(float(y_norm))
+
+    return align, margin_l, margin_r, margin_v
+
+
+def _ass_style(
+    name: str,
+    font_size: int,
+    font_color: str,
+    back_color: str,
+    border_style: int,
+    border_size: int,
+    alignment: int,
+    margin_l: int,
+    margin_r: int,
+    margin_v: int,
+) -> str:
+    return (
+        f"Style: {name},Arial,{font_size},{font_color},{font_color},"
+        f"&H00000000,{back_color},0,0,0,0,100,100,0,0,"
+        f"{border_style},{border_size},0,{alignment},{margin_l},{margin_r},{margin_v},0"
+    )
+
+
+def _split_sentence_words(sentence: str) -> list[str]:
+    return [w for w in re.split(r"\s+", sentence.strip()) if w]
+
+
+def _word_weight(word: str) -> int:
+    cleaned = re.sub(r"[^\w]", "", word)
+    return max(1, len(cleaned))
+
+
+def _auto_word_timings(
+    sentence: str, start_sec: float, end_sec: float
+) -> list[WordTiming]:
+    words = _split_sentence_words(sentence)
+    if not words:
+        return []
+    duration = end_sec - start_sec
+    if duration <= 0:
+        return []
+    weights = [_word_weight(w) for w in words]
+    total = sum(weights) or len(words)
+    timings: list[WordTiming] = []
+    current = start_sec
+    for i, word in enumerate(words):
+        if i == len(words) - 1:
+            end = end_sec
+        else:
+            end = current + duration * (weights[i] / total)
+        timings.append(WordTiming(word=word, start_sec=current, end_sec=end))
+        current = end
+    return timings
+
+
 class VideoBuilder:
     """Filter-based builder: collect watermark, text, speed, audio overlays and export in one go."""
 
@@ -409,6 +590,14 @@ class VideoBuilder:
         "compress": OperationSpec("compress"),
         "concat": OperationSpec("concat_videos"),
         "extractAudio": OperationSpec("extract_audio"),
+        "karaoke": OperationSpec(
+            method="add_karaoke_text",
+            model=KaraokeText,
+        ),
+        "textSequence": OperationSpec(
+            method="add_text_sequence",
+            model=TextSequence,
+        ),
         "text": OperationSpec(
             method="add_text",
             model=TextSegment,
@@ -462,6 +651,8 @@ class VideoBuilder:
         self._trim_duration: Optional[float] = None
         self._watermark: Optional[WatermarkOverlay] = None
         self._text_segments: list[TextSegment] = []
+        self._karaoke_segments: list[tuple[KaraokeText, list[WordTiming]]] = []
+        self._text_sequences: list[TextSequence] = []
         self._speed_segments: list[SpeedSegment] = []
         self._background_audio: Optional[AudioOverlay] = None
         self._background_color: Optional[BackgroundColor] = None
@@ -564,6 +755,35 @@ class VideoBuilder:
             self._text_segments.extend(segment)
         else:
             self._text_segments.append(segment)
+        return self
+
+    def add_karaoke_text(self, data: KaraokeText) -> "VideoBuilder":
+        """Generate word-highlight subtitles for a sentence using ASS."""
+        sentence = (data.sentence or "").strip()
+        if not sentence:
+            return self
+
+        if data.words:
+            timings = sorted(data.words, key=lambda w: w.start_sec)
+        else:
+            if data.start_sec is None or data.end_sec is None:
+                raise ValueError(
+                    "karaoke requires start_sec and end_sec when words are not provided"
+                )
+            timings = _auto_word_timings(sentence, data.start_sec, data.end_sec)
+            if not timings:
+                return self
+        if not timings:
+            return self
+
+        self._karaoke_segments.append((data, timings))
+
+        return self
+
+    def add_text_sequence(self, data: TextSequence) -> "VideoBuilder":
+        """Add a sequence of timed text items with fade animation using ASS."""
+        if data.items:
+            self._text_sequences.append(data)
         return self
 
     def speed_control(
@@ -671,6 +891,170 @@ class VideoBuilder:
         self._gif_options = options
         return self
 
+    def _karaoke_media_paths(self) -> tuple[str, str]:
+        media_host = os.path.abspath("media")
+        if os.getenv("CLIPPER_ENV", "").lower() == "production":
+            return media_host, media_host
+        return media_host, "/code/media"
+
+    def _render_karaoke_ass(
+        self,
+        data: KaraokeText,
+        timings: list[WordTiming],
+        width: int,
+        height: int,
+    ) -> str:
+        tokens = _split_sentence_words(data.sentence)
+        if len(tokens) != len(timings):
+            tokens = [t.word for t in timings]
+
+        base_color = _ass_color(data.fontcolor, "FFFFFF")
+        highlight_color = _ass_color(data.highlight_fontcolor or "yellow", "FFFF00")
+        back_default = _ass_color("black@0", "000000")
+        back_highlight = _ass_color(data.boxcolor or "black@0", "000000")
+        bord = max(0, int(data.boxborderw or 0))
+        align, margin_l, margin_r, margin_v = _ass_alignment_and_margins(data.x, data.y)
+
+        header = [
+            "[Script Info]",
+            "ScriptType: v4.00+",
+            f"PlayResX: {width}",
+            f"PlayResY: {height}",
+            "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+            _ass_style(
+                "Default",
+                data.fontsize,
+                base_color,
+                back_default,
+                3,
+                0,
+                align,
+                margin_l,
+                margin_r,
+                margin_v,
+            ),
+            "",
+            "[Events]",
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        ]
+
+        events: list[str] = []
+        for i, w in enumerate(timings):
+            parts: list[str] = []
+            for j, tok in enumerate(tokens):
+                if j == i:
+                    box_tag = f"\\4c{back_highlight}" if data.boxcolor else ""
+                    bord_tag = f"\\bord{bord}" if bord > 0 else ""
+                    parts.append(
+                        f"{{\\1c{highlight_color}{box_tag}{bord_tag}}}{_ass_escape(tok)}{{\\r}}"
+                    )
+                else:
+                    parts.append(_ass_escape(tok))
+            text = " ".join(parts)
+            events.append(
+                f"Dialogue: 0,{_ass_time(w.start_sec)},{_ass_time(w.end_sec)},Default,,0,0,0,,{text}"
+            )
+
+        return "\n".join(header + events) + "\n"
+
+    def _build_karaoke_ass_files(self, width: int, height: int) -> list[str]:
+        if not self._karaoke_segments:
+            return []
+        media_host, media_ffmpeg = self._karaoke_media_paths()
+        karaoke_dir = os.path.join(media_host, "karaoke")
+        os.makedirs(karaoke_dir, exist_ok=True)
+        out_paths: list[str] = []
+        for data, timings in self._karaoke_segments:
+            filename = f"karaoke_{uuid.uuid4().hex}.ass"
+            host_path = os.path.join(karaoke_dir, filename)
+            ffmpeg_path = f"{media_ffmpeg}/karaoke/{filename}"
+            content = self._render_karaoke_ass(data, timings, width, height)
+            with open(host_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            out_paths.append(ffmpeg_path)
+        return out_paths
+
+    def _render_text_sequence_ass(
+        self, sequence: TextSequence, width: int, height: int
+    ) -> str:
+        header = [
+            "[Script Info]",
+            "ScriptType: v4.00+",
+            f"PlayResX: {width}",
+            f"PlayResY: {height}",
+            "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        ]
+
+        styles: list[str] = []
+        events: list[str] = []
+        for i, item in enumerate(sequence.items):
+            base_color = _ass_color(item.fontcolor, "FFFFFF")
+            back_color = _ass_color(item.boxcolor or "black@0", "000000")
+            align, margin_l, margin_r, margin_v = _ass_alignment_and_margins(
+                item.x, item.y
+            )
+            style_name = f"S{i}"
+            border_style = 3 if item.background else 1
+            border_size = max(0, int(item.boxborderw or 0)) if item.background else 0
+            styles.append(
+                _ass_style(
+                    style_name,
+                    item.fontsize,
+                    base_color,
+                    back_color,
+                    border_style,
+                    border_size,
+                    align,
+                    margin_l,
+                    margin_r,
+                    margin_v,
+                )
+            )
+            fade_in = max(0, int(item.fade_in_ms or 0))
+            fade_out = max(0, int(item.fade_out_ms or 0))
+            fade_tag = (
+                f"{{\\fad({fade_in},{fade_out})}}" if (fade_in or fade_out) else ""
+            )
+            text = f"{fade_tag}{_ass_escape(item.text)}"
+            events.append(
+                f"Dialogue: 0,{_ass_time(item.start_sec)},{_ass_time(item.end_sec)},{style_name},,0,0,0,,{text}"
+            )
+
+        return (
+            "\n".join(
+                header
+                + styles
+                + [
+                    "",
+                    "[Events]",
+                    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+                ]
+                + events
+            )
+            + "\n"
+        )
+
+    def _build_text_sequence_ass_files(self, width: int, height: int) -> list[str]:
+        if not self._text_sequences:
+            return []
+        media_host, media_ffmpeg = self._karaoke_media_paths()
+        seq_dir = os.path.join(media_host, "text_sequences")
+        os.makedirs(seq_dir, exist_ok=True)
+        out_paths: list[str] = []
+        for seq in self._text_sequences:
+            filename = f"textseq_{uuid.uuid4().hex}.ass"
+            host_path = os.path.join(seq_dir, filename)
+            ffmpeg_path = f"{media_ffmpeg}/text_sequences/{filename}"
+            content = self._render_text_sequence_ass(seq, width, height)
+            with open(host_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            out_paths.append(ffmpeg_path)
+        return out_paths
+
     def _build_filter_complex(
         self,
         duration: float,
@@ -774,6 +1158,20 @@ class VideoBuilder:
             text_chain = ",".join(drawtext_filters)
             parts.append(f"{video_in}{text_chain}[v_txt]")
             video_in = "[v_txt]"
+
+        if self._karaoke_segments:
+            ass_files = self._build_karaoke_ass_files(w, h)
+            for i, path in enumerate(ass_files):
+                esc_path = (path or "").replace("'", r"\'")
+                parts.append(f"{video_in}subtitles='{esc_path}'[v_kar{i}]")
+                video_in = f"[v_kar{i}]"
+
+        if self._text_sequences:
+            seq_files = self._build_text_sequence_ass_files(w, h)
+            for i, path in enumerate(seq_files):
+                esc_path = (path or "").replace("'", r"\'")
+                parts.append(f"{video_in}subtitles='{esc_path}'[v_seq{i}]")
+                video_in = f"[v_seq{i}]"
 
         if self._watermark is not None:
             extra_inputs.append(self._watermark.path)
@@ -912,6 +1310,8 @@ class VideoBuilder:
             self._trim_start is not None
             or self._speed_segments
             or self._text_segments
+            or self._karaoke_segments
+            or self._text_sequences
             or self._watermark is not None
             or self._background_audio is not None
             or self._background_color is not None

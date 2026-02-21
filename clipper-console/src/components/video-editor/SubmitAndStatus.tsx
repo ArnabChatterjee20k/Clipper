@@ -31,6 +31,9 @@ export function SubmitAndStatus({
   const { edit, loading: submitting, error: submitError, data: editData } = useEditVideo();
   const { start, stop, job, loading: streaming } = useJobStatus();
   const [showJson, setShowJson] = useState(false);
+  const [showPasteJson, setShowPasteJson] = useState(false);
+  const [jsonInput, setJsonInput] = useState("");
+  const [jsonInputError, setJsonInputError] = useState<string | null>(null);
 
   useEffect(() => {
     if (editData?.id) {
@@ -46,6 +49,60 @@ export function SubmitAndStatus({
   const handleSubmit = () => {
     if (!toRequest) return;
     edit(toRequest);
+  };
+
+  const handleOpenPasteJson = () => {
+    setShowPasteJson(true);
+    setJsonInputError(null);
+    setJsonInput(
+      JSON.stringify(
+        toRequest ?? { media: "", operations: [] },
+        null,
+        2,
+      ),
+    );
+  };
+
+  const handleSubmitJson = () => {
+    try {
+      const parsed = JSON.parse(jsonInput) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setJsonInputError("JSON must be an object");
+        return;
+      }
+
+      const { media, operations } = parsed as { media?: unknown; operations?: unknown };
+      if (typeof media !== "string" || !media.trim()) {
+        setJsonInputError("media must be a non-empty string");
+        return;
+      }
+      if (!Array.isArray(operations)) {
+        setJsonInputError("operations must be an array");
+        return;
+      }
+      const invalidOp = operations.some(
+        (op) =>
+          !op ||
+          typeof op !== "object" ||
+          Array.isArray(op) ||
+          !("op" in op) ||
+          typeof (op as { op?: unknown }).op !== "string",
+      );
+      if (invalidOp) {
+        setJsonInputError("each operation must be an object with string op");
+        return;
+      }
+
+      setJsonInputError(null);
+      edit({
+        ...(parsed as VideoEditRequest),
+        media: media.trim(),
+        operations: operations as VideoEditRequest["operations"],
+      });
+      setShowPasteJson(false);
+    } catch (e) {
+      setJsonInputError(e instanceof Error ? e.message : "Invalid JSON");
+    }
   };
 
   const outputFilename =
@@ -89,6 +146,15 @@ export function SubmitAndStatus({
             <Code className="size-4 mr-2" />
             Get JSON
           </Button>
+
+          <Button
+            variant="outline"
+            onClick={handleOpenPasteJson}
+            disabled={submitting}
+          >
+            <Code className="size-4 mr-2" />
+            Paste JSON
+          </Button>
         </div>
 
         <Dialog open={showJson} onOpenChange={setShowJson}>
@@ -104,6 +170,37 @@ export function SubmitAndStatus({
                   navigator.clipboard.writeText(jsonString);
                 }}>
                   Copy to clipboard
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showPasteJson} onOpenChange={setShowPasteJson}>
+          <DialogContent title="Submit Request JSON" className="max-w-2xl">
+            <div className="p-4 space-y-3">
+              <Textarea
+                value={jsonInput}
+                onChange={(e) => {
+                  setJsonInput(e.target.value);
+                  setJsonInputError(null);
+                }}
+                className="font-mono text-xs min-h-[300px]"
+                placeholder='{"media":"https://...","operations":[{"op":"trim","start_sec":0,"end_sec":5}]}'
+              />
+              {jsonInputError && (
+                <p className="text-xs text-destructive">{jsonInputError}</p>
+              )}
+              <div className="flex justify-end">
+                <Button onClick={handleSubmitJson} disabled={submitting}>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" />
+                      Submitting…
+                    </>
+                  ) : (
+                    "Submit JSON"
+                  )}
                 </Button>
               </div>
             </div>

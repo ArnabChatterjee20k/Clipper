@@ -93,7 +93,7 @@ async def load_schemas():
         await db.execute("""
                 CREATE TABLE IF NOT EXISTS buckets(
                     id serial PRIMARY KEY,
-                    name VARCHAR(200),
+                    name TEXT,
                     created_at timestamp
                 )
             """)
@@ -103,7 +103,7 @@ async def load_schemas():
         await db.execute("""
                 CREATE TABLE IF NOT EXISTS files(
                     id serial PRIMARY KEY,
-                    name VARCHAR(200),
+                    name TEXT,
                     bucketname VARCHAR(50),
                     filetype  VARCHAR(20),
                     created_at timestamp
@@ -175,7 +175,7 @@ async def load_schemas():
                     youtube_url TEXT NOT NULL,
                     video_id VARCHAR(50) NOT NULL,
                     video_title TEXT,
-                    filename VARCHAR(200) NOT NULL,
+                    filename TEXT NOT NULL,
                     bucketname VARCHAR(50) NOT NULL,
                     file_id INTEGER REFERENCES files(id),
                     quality VARCHAR(20),

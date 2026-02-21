@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 
 const OP_TYPES: { value: VideoOperation["op"]; label: string }[] = [
   { value: "trim", label: "Trim" },
+  { value: "karaoke", label: "Karaoke highlight" },
+  { value: "textSequence", label: "Text sequence (fade)" },
   { value: "text", label: "Text overlay" },
   { value: "speed", label: "Speed" },
   { value: "watermark", label: "Watermark" },
@@ -40,6 +42,8 @@ const OP_TYPES: { value: VideoOperation["op"]; label: string }[] = [
 
 const OP_LABELS: Record<string, string> = {
   trim: "Trim",
+  karaoke: "Karaoke highlight",
+  textSequence: "Text sequence (fade)",
   text: "Text overlay",
   speed: "Speed",
   watermark: "Watermark",
@@ -59,6 +63,8 @@ export interface OperationListProps {
   onRemove: (index: number) => void;
   onUpdate: (index: number, op: VideoOperation) => void;
   addTrim?: () => void;
+  addKaraoke?: () => void;
+  addTextSequence?: () => void;
   addText?: () => void;
   addSpeed?: (speed?: number) => void;
   addWatermark?: () => void;
@@ -81,6 +87,8 @@ export function OperationList({
   onRemove,
   onUpdate,
   addTrim,
+  addKaraoke,
+  addTextSequence,
   addText,
   addSpeed,
   addWatermark,
@@ -106,6 +114,8 @@ export function OperationList({
     setSelectValue(ADD_PLACEHOLDER);
     const helpers: Record<string, () => void> = {
       trim: addTrim ?? (() => onAdd({ op: "trim", start_sec: 0, end_sec: -1 })),
+      karaoke: addKaraoke ?? (() => onAdd({ op: "karaoke", sentence: "", start_sec: 0, end_sec: 2, fontsize: 60, x: "(w-text_w)/2", y: "h-200", fontcolor: "white", highlight_fontcolor: "yellow", boxcolor: "black@1.0", boxborderw: 12 })),
+      textSequence: addTextSequence ?? (() => onAdd({ op: "textSequence", items: [{ text: "First line", start_sec: 0, end_sec: 2, fontsize: 60, x: "(w-text_w)/2", y: "h-200", fontcolor: "white", background: false, boxcolor: "black@1.0", boxborderw: 12, fade_in_ms: 200, fade_out_ms: 200 }] })),
       text: addText ?? (() => onAdd({ op: "text", segment: [{ start_sec: 0, end_sec: -1, text: "" }] })),
       speed: addSpeed ? () => addSpeed(1) : () => onAdd({ op: "speed", segment: [{ start_sec: 0, end_sec: -1, speed: 1 }] }),
       watermark: addWatermark ?? (() => onAdd({ op: "watermark", overlay: { path: "", position: "(W-w)/2:H-h-80", opacity: 0.7 } })),

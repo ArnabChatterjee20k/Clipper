@@ -44,6 +44,32 @@ export function OperationSummary({ action, compact = false, className }: Operati
       const str = `Trim: ${fmtTime(start)}–${fmtTime(end)}`;
       parts.push(str);
       if (!compact) blocks.push(<div key={i} className="text-xs">{str}</div>);
+    } else if (op === "karaoke") {
+      const d = data as { sentence?: string; start_sec?: number; end_sec?: number } | undefined;
+      const start = d?.start_sec ?? 0;
+      const end = d?.end_sec ?? -1;
+      const text = d?.sentence ? `"${d.sentence}"` : "";
+      const str = `Karaoke: ${fmtTime(start)}–${fmtTime(end)} ${text}`;
+      parts.push(str.trim());
+      if (!compact) blocks.push(<div key={i} className="text-xs">{str.trim()}</div>);
+    } else if (op === "textSequence") {
+      const items = (data as { items?: Array<{ text?: string; start_sec?: number; end_sec?: number }> })?.items ?? [];
+      const itemStrs = items.map((s) => {
+        const t = typeof s?.text === "string" ? `"${s.text}"` : "";
+        return `${fmtTime(s?.start_sec)}–${fmtTime(s?.end_sec)}: ${t}`;
+      });
+      const str = itemStrs.length ? `Text sequence: ${itemStrs.join("; ")}` : "Text sequence";
+      parts.push(str);
+      if (!compact && itemStrs.length) {
+        blocks.push(
+          <div key={i} className="text-xs space-y-0.5">
+            <span className="font-medium text-muted-foreground">Text sequence:</span>
+            {itemStrs.map((s, j) => (
+              <div key={j} className="pl-2 text-muted-foreground">{s}</div>
+            ))}
+          </div>
+        );
+      } else if (!compact) blocks.push(<div key={i} className="text-xs">Text sequence</div>);
     } else if (op === "text") {
       const segs = Array.isArray(data) ? data : [];
       const segStrs = segs.map((s: { start_sec?: number; end_sec?: number; text?: string }) => {

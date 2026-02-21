@@ -26,6 +26,49 @@ export interface TextSegment {
   background?: boolean | null;
 }
 
+export interface WordTiming {
+  word: string;
+  start_sec: number;
+  end_sec: number;
+}
+
+export interface KaraokeOp {
+  op: "karaoke";
+  sentence: string;
+  start_sec?: number;
+  end_sec?: number;
+  words?: WordTiming[];
+  fontsize?: number;
+  x?: string;
+  y?: string;
+  fontcolor?: string | null;
+  highlight_fontcolor?: string | null;
+  boxcolor?: string | null;
+  boxborderw?: number | null;
+  letter_width?: number | null;
+  space_width?: number | null;
+}
+
+export interface TimedTextItem {
+  text: string;
+  start_sec: number;
+  end_sec: number;
+  fontsize?: number;
+  x?: string;
+  y?: string;
+  fontcolor?: string | null;
+  boxcolor?: string | null;
+  boxborderw?: number | null;
+  background?: boolean;
+  fade_in_ms?: number;
+  fade_out_ms?: number;
+}
+
+export interface TextSequenceOp {
+  op: "textSequence";
+  items: TimedTextItem[];
+}
+
 export interface TextOp {
   op: "text";
   segment: TextSegment[];
@@ -135,6 +178,8 @@ export interface DownloadFromYouTubeOp {
 /** Single operation in the pipeline (discriminated by op) */
 export type VideoOperation =
   | TrimOp
+  | KaraokeOp
+  | TextSequenceOp
   | TextOp
   | SpeedOp
   | WatermarkOp
@@ -169,6 +214,40 @@ export function defaultTextSegment(overrides?: Partial<TextSegment>): TextSegmen
     ...overrides,
   };
 }
+
+export const defaultKaraokeOp: KaraokeOp = {
+  op: "karaoke",
+  sentence: "",
+  start_sec: 0,
+  end_sec: 2,
+  fontsize: 60,
+  x: "(w-text_w)/2",
+  y: "h-200",
+  fontcolor: "white",
+  highlight_fontcolor: "yellow",
+  boxcolor: "black@1.0",
+  boxborderw: 12,
+};
+
+export const defaultTextSequenceOp: TextSequenceOp = {
+  op: "textSequence",
+  items: [
+    {
+      text: "First line",
+      start_sec: 0,
+      end_sec: 2,
+      fontsize: 60,
+      x: "(w-text_w)/2",
+      y: "h-200",
+      fontcolor: "white",
+      background: false,
+      boxcolor: "black@1.0",
+      boxborderw: 12,
+      fade_in_ms: 200,
+      fade_out_ms: 200,
+    },
+  ],
+};
 
 /** Default speed segment */
 export function defaultSpeedOp(speed: number = 1): SpeedOp {

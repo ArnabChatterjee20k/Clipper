@@ -48,6 +48,36 @@ import type { EditUpdateBody } from "@/lib/clipper-api";
 
 const PAGE_SIZE = 20;
 
+type ActionItem = { op?: string; data?: unknown };
+
+function buildEditRequestPayload(edit: EditItem): { media: string; operations: Array<Record<string, unknown>> } {
+  const action = Array.isArray(edit.action) ? (edit.action as ActionItem[]) : [];
+  const operations = action
+    .map((item) => {
+      const op = typeof item?.op === "string" ? item.op : "unknown";
+      const data = item?.data;
+      if (op === "text" || op === "speed") {
+        return { op, segment: Array.isArray(data) ? data : [] };
+      }
+      if (op === "watermark" || op === "backgroundColor") {
+        return { op, overlay: data && typeof data === "object" && !Array.isArray(data) ? data : {} };
+      }
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        return { op, ...(data as Record<string, unknown>) };
+      }
+      if (Array.isArray(data)) {
+        return { op, data };
+      }
+      return { op };
+    })
+    .filter((item) => item.op && item.op !== "unknown");
+
+  return {
+    media: edit.input ?? "",
+    operations,
+  };
+}
+
 function filterEdits(
   edits: EditItem[],
   search: string,
@@ -657,7 +687,7 @@ function EditDetailDialog({
     if (edit) {
       setShowJson(true);
       try {
-        setJsonText(JSON.stringify(edit, null, 2));
+        setJsonText(JSON.stringify(buildEditRequestPayload(edit), null, 2));
         setJsonError(null);
       } catch {
         setJsonError("Failed to serialize");
@@ -703,7 +733,7 @@ function EditDetailDialog({
             {showJson ? (
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <Label className="text-xs">JSON</Label>
+                  <Label className="text-xs">API JSON (POST /edits)</Label>
                   {onUpdate && (
                     <Button size="sm" onClick={handleSaveJson} disabled={updating || !!jsonError}>
                       {updating ? <Loader2 className="size-4 mr-1 animate-spin" /> : <Save className="size-4 mr-1" />}

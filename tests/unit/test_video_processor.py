@@ -17,6 +17,9 @@ from modules.video_processor import (
     BackgroundColor,
     TranscodeOptions,
     GifOptions,
+    KaraokeText,
+    TextSequence,
+    TimedText,
     _atempo_chain,
     _build_concat_manifest,
     _resolve_end_sec,
@@ -205,6 +208,34 @@ class TestExportText:
         assert fc is not None
         # end_sec=-1 resolves to duration (30 or 30.0 depending on float format)
         assert "between(t," in fc and "30" in fc
+
+
+# --- Export: karaoke ---
+
+
+class TestExportKaraoke:
+    def test_karaoke_auto_timings_adds_word_overlays(self, default_info):
+        b = VideoBuilder("input.mp4").add_karaoke_text(
+            KaraokeText(sentence="one two", start_sec=0, end_sec=2, fontsize=30)
+        )
+        cmd = b._build(default_info)
+        fc = filter_complex(cmd)
+        assert fc is not None
+        assert "subtitles=" in fc
+
+
+class TestTextSequenceValidation:
+    def test_text_sequence_requires_at_least_one_item(self):
+        with pytest.raises(ValueError, match="at least one item"):
+            TextSequence(items=[])
+
+    def test_text_sequence_item_end_must_be_after_start(self):
+        with pytest.raises(ValueError, match="end_sec must be greater"):
+            TextSequence(items=[TimedText(text="bad", start_sec=2, end_sec=1)])
+
+    def test_text_sequence_valid_item(self):
+        seq = TextSequence(items=[TimedText(text="ok", start_sec=0, end_sec=2)])
+        assert len(seq.items) == 1
 
 
 # --- Export: speed ---
