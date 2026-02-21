@@ -42,9 +42,10 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { BucketBrowser } from "@/components/bucket/BucketBrowser";
 import { TableSkeleton } from "@/components/edits";
 import type { TimeFilter } from "@/components/edits";
-import { Loader2, Plus, Pencil, Play, Trash2, Code, Save, Copy, X, Eye } from "lucide-react";
+import { Loader2, Plus, Pencil, Play, Trash2, Code, Save, Copy, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatRelative, formatExact } from "@/lib/relative-time";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 const PAGE_SIZE = 20;
 const TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
@@ -87,6 +88,15 @@ function normalizeSteps(steps: unknown): VideoOperation[][] {
 
 type WorkflowItem = import("@/lib/clipper-api").WorkflowItem;
 type ExecutionItem = { id: number; workflow_id: number; progress?: number; created_at?: string; updated_at?: string; workflow_name?: string };
+type ExecutionJobs = { uid?: string; jobs: any[] };
+
+function getJobOutput(job: any): { url?: string; filename?: string } | undefined {
+  if (!job) return undefined;
+  const output = job.output ?? job.result?.output ?? job.result;
+  if (!output || typeof output !== "object" || Array.isArray(output)) return undefined;
+  const out = output as { filename?: string; url?: string };
+  return { filename: out.filename, url: out.url };
+}
 
 export function WorkflowsPage() {
   const { list, loading, error, data } = useListWorkflows();
@@ -116,8 +126,11 @@ export function WorkflowsPage() {
   const [runModal, setRunModal] = useState<{ workflowId: number; name: string } | null>(null);
   const [runMedia, setRunMedia] = useState("");
   const [runMediaName, setRunMediaName] = useState("");
-  const { fetchJobs, loading: loadingExecutionJobs, data: executionJobs } = useExecutionJobs();
-  const [selectedExecutionId, setSelectedExecutionId] = useState<number | null>(null);
+  const { fetchJobs } = useExecutionJobs();
+  const [expandedExecutionId, setExpandedExecutionId] = useState<number | null>(null);
+  const [executionJobsMap, setExecutionJobsMap] = useState<Map<number, ExecutionJobs>>(new Map());
+  const [loadingExecutionId, setLoadingExecutionId] = useState<number | null>(null);
+  const [expandedJobMap, setExpandedJobMap] = useState<Map<number, number | null>>(new Map());
   const [showJson, setShowJson] = useState(false);
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -380,6 +393,43 @@ export function WorkflowsPage() {
     });
   }, [listAllExecutions, executionsLastId]);
 
+  const loadExecutionJobs = useCallback(async (executionId: number) => {
+    setLoadingExecutionId(executionId);
+    try {
+      const out = await fetchJobs(executionId);
+      if (out) {
+        setExecutionJobsMap((prev) => {
+          const next = new Map(prev);
+          next.set(executionId, { uid: out.uid, jobs: (out.jobs as any[]) ?? [] });
+          return next;
+        });
+      }
+    } catch {
+      // handled in hook
+    } finally {
+      setLoadingExecutionId(null);
+    }
+  }, [fetchJobs]);
+
+  const toggleExecutionExpand = useCallback((executionId: number) => {
+    setExpandedExecutionId((prev) => {
+      const next = prev === executionId ? null : executionId;
+      if (next != null && !executionJobsMap.has(next)) {
+        loadExecutionJobs(next);
+      }
+      return next;
+    });
+  }, [executionJobsMap, loadExecutionJobs]);
+
+  const toggleJobExpand = useCallback((executionId: number, jobId: number) => {
+    setExpandedJobMap((prev) => {
+      const next = new Map(prev);
+      const current = next.get(executionId) ?? null;
+      next.set(executionId, current === jobId ? null : jobId);
+      return next;
+    });
+  }, []);
+
   const hasWfFilters = wfSearch !== "" || wfTimeFilter !== "all";
   const hasExecFilters = execSearch !== "" || execTimeFilter !== "all";
   const clearWfFilters = () => { setWfSearch(""); setWfTimeFilter("all"); };
@@ -469,7 +519,15 @@ export function WorkflowsPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm table-fixed border-collapse text-left [&_th]:text-left [&_td]:text-left">
+                    <colgroup>
+                      <col style={{ width: "4.5rem" }} />
+                      <col />
+                      <col style={{ width: "6rem" }} />
+                      <col style={{ width: "7rem" }} />
+                      <col style={{ width: "8rem" }} />
+                      <col style={{ width: "8.5rem" }} />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-border text-muted-foreground bg-muted/30">
                         <th className="w-10 py-3 pl-4 pr-2 font-medium text-left">ID</th>
@@ -557,7 +615,14 @@ export function WorkflowsPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-sm table-fixed border-collapse text-left [&_th]:text-left [&_td]:text-left">
+                    <colgroup>
+                      <col style={{ width: "4.5rem" }} />
+                      <col />
+                      <col style={{ width: "6rem" }} />
+                      <col style={{ width: "8rem" }} />
+                      <col style={{ width: "7rem" }} />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-border text-muted-foreground bg-muted/30">
                         <th className="w-10 py-3 pl-4 pr-2 font-medium text-left">ID</th>
@@ -568,31 +633,189 @@ export function WorkflowsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredExecutions.map((exec) => (
-                        <tr key={exec.id} className="border-b border-border hover:bg-muted/20">
-                          <td className="py-2 pl-4 pr-2">
-                            <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/50 px-2 py-0.5 font-mono text-xs" title={String(exec.id)}>
-                              {exec.id}
-                              <Copy className="size-3 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(String(exec.id)); }} />
-                            </span>
-                          </td>
-                          <td className="py-2 px-2 text-muted-foreground">{exec.workflow_name ?? `Workflow ${exec.workflow_id}`}</td>
-                          <td className="py-2 px-2 text-muted-foreground">{exec.progress ?? 0}%</td>
-                          <td className="py-2 px-2 text-muted-foreground text-xs whitespace-nowrap" title={formatExact(exec.created_at)}>{formatRelative(exec.created_at)}</td>
-                          <td className="py-2 pr-4 pl-2 text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => { setSelectedExecutionId(exec.id); fetchJobs(exec.id); }}
-                              disabled={loadingExecutionJobs && selectedExecutionId === exec.id}
-                              title="View jobs"
+                      {filteredExecutions.map((exec) => {
+                        const isExpanded = expandedExecutionId === exec.id;
+                        const jobsData = executionJobsMap.get(exec.id);
+                        const jobs = jobsData?.jobs ?? [];
+                        const expandedJobId = expandedJobMap.get(exec.id) ?? null;
+                        return (
+                          <>
+                            <tr
+                              key={exec.id}
+                              className={cn(
+                                "border-b border-border hover:bg-muted/20 cursor-pointer transition-colors",
+                                isExpanded && "bg-muted/20"
+                              )}
+                              onClick={() => toggleExecutionExpand(exec.id)}
                             >
-                              <Eye className="size-4" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                              <td className="py-2 pl-4 pr-2">
+                                <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/50 px-2 py-0.5 font-mono text-xs" title={String(exec.id)}>
+                                  {exec.id}
+                                  <Copy
+                                    className="size-3 opacity-60 hover:opacity-100"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigator.clipboard.writeText(String(exec.id));
+                                    }}
+                                  />
+                                </span>
+                              </td>
+                              <td className="py-2 px-2 text-muted-foreground">{exec.workflow_name ?? `Workflow ${exec.workflow_id}`}</td>
+                              <td className="py-2 px-2 text-muted-foreground">{exec.progress ?? 0}%</td>
+                              <td className="py-2 px-2 text-muted-foreground text-xs whitespace-nowrap" title={formatExact(exec.created_at)}>{formatRelative(exec.created_at)}</td>
+                              <td className="py-2 pr-4 pl-2 text-right" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-0.5">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => toggleExecutionExpand(exec.id)}
+                                    title={isExpanded ? "Collapse" : "Expand"}
+                                  >
+                                    {isExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr key={`${exec.id}-expand`}>
+                                <td colSpan={5} className="p-0">
+                                  <div className="px-4 py-4 border-t border-border bg-muted/10">
+                                    <div className="grid grid-cols-2 gap-2 text-xs mb-4">
+                                      <span className="text-muted-foreground">Execution ID</span>
+                                      <span className="font-mono">{exec.id}</span>
+                                      <span className="text-muted-foreground">Workflow</span>
+                                      <span className="text-muted-foreground">{exec.workflow_name ?? `Workflow ${exec.workflow_id}`}</span>
+                                      <span className="text-muted-foreground">Progress</span>
+                                      <span className="text-muted-foreground">{exec.progress ?? 0}%</span>
+                                      <span className="text-muted-foreground">Created</span>
+                                      <span>{formatExact(exec.created_at)}</span>
+                                      <span className="text-muted-foreground">Updated</span>
+                                      <span>{formatExact(exec.updated_at)}</span>
+                                    </div>
+
+                                    <div className="text-xs text-muted-foreground mb-2">
+                                      Jobs {jobsData?.uid ? `(UID: ${jobsData.uid})` : ""}
+                                    </div>
+                                    {loadingExecutionId === exec.id ? (
+                                      <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+                                        <Loader2 className="size-4 animate-spin" />
+                                        Loading jobs…
+                                      </div>
+                                    ) : jobs.length > 0 ? (
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-sm table-fixed border-collapse text-left [&_th]:text-left [&_td]:text-left">
+                                          <colgroup>
+                                            <col style={{ width: "5rem" }} />
+                                            <col style={{ width: "8rem" }} />
+                                            <col />
+                                            <col style={{ width: "7rem" }} />
+                                          </colgroup>
+                                          <thead>
+                                            <tr className="border-b border-border text-muted-foreground bg-muted/30">
+                                              <th className="py-2 pr-2 pl-2 font-medium text-left">Job ID</th>
+                                              <th className="py-2 px-2 font-medium text-left">Status</th>
+                                              <th className="py-2 px-2 font-medium text-left">Output</th>
+                                              <th className="py-2 px-2 font-medium text-right">Actions</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {jobs.map((job) => {
+                                              const isJobExpanded = expandedJobId === job.id;
+                                              const output = getJobOutput(job);
+                                              const outputLabel = output?.filename ?? output?.url ?? "—";
+                                              return (
+                                                <>
+                                                  <tr
+                                                    key={job.id}
+                                                    className={cn(
+                                                      "border-b border-border hover:bg-muted/20 cursor-pointer transition-colors",
+                                                      isJobExpanded && "bg-muted/20"
+                                                    )}
+                                                    onClick={() => toggleJobExpand(exec.id, job.id)}
+                                                  >
+                                                    <td className="py-2 pl-2 pr-2 font-mono text-xs">{job.id}</td>
+                                                    <td className="py-2 px-2 text-muted-foreground">{job.status ?? "—"}</td>
+                                                    <td className="py-2 px-2 text-muted-foreground truncate" title={String(outputLabel)}>
+                                                      {outputLabel}
+                                                    </td>
+                                                    <td className="py-2 px-2 text-right" onClick={(e) => e.stopPropagation()}>
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-7 w-7"
+                                                        onClick={() => toggleJobExpand(exec.id, job.id)}
+                                                        title={isJobExpanded ? "Collapse" : "Expand"}
+                                                      >
+                                                        {isJobExpanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                                                      </Button>
+                                                    </td>
+                                                  </tr>
+                                                  {isJobExpanded && (
+                                                    <tr key={`${job.id}-expand`}>
+                                                      <td colSpan={4} className="p-0">
+                                                        <div className="px-3 py-3 bg-muted/10 border-t border-border">
+                                                          <div className="grid grid-cols-2 gap-2 text-xs mb-3">
+                                                            <span className="text-muted-foreground">Job ID</span>
+                                                            <span className="font-mono">{job.id}</span>
+                                                            <span className="text-muted-foreground">Status</span>
+                                                            <span>{job.status ?? "—"}</span>
+                                                            <span className="text-muted-foreground">Updated</span>
+                                                            <span>{formatDate(job.updated_at)}</span>
+                                                            <span className="text-muted-foreground">Progress</span>
+                                                            <span>{job.progress ?? job.percent ?? 0}%</span>
+                                                          </div>
+                                                          {job.error && (
+                                                            <div className="mb-3">
+                                                              <span className="text-muted-foreground text-xs">Error</span>
+                                                              <div className="mt-1 p-2 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive whitespace-pre-wrap">
+                                                                {String(job.error)}
+                                                              </div>
+                                                            </div>
+                                                          )}
+                                                          {output?.filename && (
+                                                            <div className="mb-3">
+                                                              <p className="text-muted-foreground text-xs mb-2">Output</p>
+                                                              {output.url ? (
+                                                                <>
+                                                                  <VideoPlayer url={output.url} filename={output.filename} maxHeight="max-h-64" />
+                                                                  <p className="mt-1 font-mono text-[11px] break-all text-muted-foreground">
+                                                                    {output.url}
+                                                                  </p>
+                                                                </>
+                                                              ) : (
+                                                                <p className="text-xs font-mono break-all">{output.filename}</p>
+                                                              )}
+                                                            </div>
+                                                          )}
+                                                          <div>
+                                                            <p className="text-muted-foreground text-xs mb-2">Raw job data</p>
+                                                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded border bg-background p-2">
+                                                              {JSON.stringify(job, null, 2)}
+                                                            </pre>
+                                                          </div>
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  )}
+                                                </>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    ) : (
+                                      <p className="text-muted-foreground text-sm py-2">
+                                        No jobs found for this execution.
+                                      </p>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -761,62 +984,6 @@ export function WorkflowsPage() {
                   </div>
                 )}
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-      {selectedExecutionId != null && (
-        <Card className="mt-6">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Execution jobs</CardTitle>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setSelectedExecutionId(null)}
-              >
-                Close
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {executionJobs?.uid && (
-              <p className="text-xs text-muted-foreground mb-2">UID: {executionJobs.uid}</p>
-            )}
-            {loadingExecutionJobs ? (
-              <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
-                <Loader2 className="size-4 animate-spin" />
-                Loading…
-              </div>
-            ) : executionJobs?.jobs && (executionJobs.jobs as any[]).length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="pb-2 pr-4 font-medium text-center">Job ID</th>
-                      <th className="pb-2 pr-4 font-medium text-center">Status</th>
-                      <th className="pb-2 font-medium text-center">Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(executionJobs.jobs as any[]).map((job) => (
-                      <tr key={job.id} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="py-2 pr-4 font-mono text-xs text-center">{job.id}</td>
-                        <td className="py-2 pr-4 text-muted-foreground text-center">
-                          {job.status}
-                        </td>
-                        <td className="py-2 pr-4 text-muted-foreground text-xs text-center">
-                          {job.updated_at ? formatDate(job.updated_at) : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-sm py-4">
-                No jobs found for this execution.
-              </p>
             )}
           </CardContent>
         </Card>
