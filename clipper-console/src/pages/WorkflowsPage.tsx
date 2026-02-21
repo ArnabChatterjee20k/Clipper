@@ -1,8 +1,9 @@
 /**
  * Workflows: list, create/edit (multi-step), run with media + job status.
+ * Dashboard-style tables with filters, relative time, Load more.
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   useListWorkflows,
   useGetWorkflow,
@@ -39,8 +40,19 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { BucketBrowser } from "@/components/bucket/BucketBrowser";
-import { Loader2, Plus, Pencil, Play, Trash2, Code, Save } from "lucide-react";
+import { TableSkeleton } from "@/components/edits";
+import type { TimeFilter } from "@/components/edits";
+import { Loader2, Plus, Pencil, Play, Trash2, Code, Save, Copy, X, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatRelative, formatExact } from "@/lib/relative-time";
+
+const PAGE_SIZE = 20;
+const TIME_OPTIONS: { value: TimeFilter; label: string }[] = [
+  { value: "24h", label: "Last 24h" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "all", label: "All time" },
+];
 
 function formatDate(iso: string | undefined): string {
   if (!iso) return "—";
@@ -49,6 +61,19 @@ function formatDate(iso: string | undefined): string {
   } catch {
     return iso;
   }
+}
+
+function filterByTime<T extends { created_at?: string }>(items: T[], timeFilter: TimeFilter): T[] {
+  if (timeFilter === "all") return items;
+  const now = Date.now();
+  const ms: Record<TimeFilter, number> = {
+    all: 0,
+    "24h": 24 * 60 * 60 * 1000,
+    "7d": 7 * 24 * 60 * 60 * 1000,
+    "30d": 30 * 24 * 60 * 60 * 1000,
+  };
+  const cutoff = now - ms[timeFilter];
+  return items.filter((e) => new Date(e.created_at ?? 0).getTime() >= cutoff);
 }
 
 /** Normalize backend steps (may be raw JSON) to VideoOperation[][] */
@@ -60,6 +85,9 @@ function normalizeSteps(steps: unknown): VideoOperation[][] {
   });
 }
 
+type WorkflowItem = import("@/lib/clipper-api").WorkflowItem;
+type ExecutionItem = { id: number; workflow_id: number; progress?: number; created_at?: string; updated_at?: string; workflow_name?: string };
+
 export function WorkflowsPage() {
   const { list, loading, error, data } = useListWorkflows();
   const { get, data: workflowDetail } = useGetWorkflow();
@@ -68,9 +96,16 @@ export function WorkflowsPage() {
   const { execute, loading: executing, data: execResult } = useExecuteWorkflow();
   const { start: startJobStatus, job } = useJobStatus();
   const { deleteWorkflow, loading: deleting } = useDeleteWorkflow();
-  const [executionsMap, setExecutionsMap] = useState<Map<number, number>>(new Map());
+  const [executionsCountMap, setExecutionsCountMap] = useState<Map<number, number>>(new Map());
   const { list: listExecutions } = useListWorkflowExecutions();
   const { list: listAllExecutions, loading: loadingAllExecutions, data: allExecutionsData } = useListAllExecutions();
+
+  const [workflowsMap, setWorkflowsMap] = useState<Map<number, WorkflowItem>>(new Map());
+  const [workflowsLastId, setWorkflowsLastId] = useState(0);
+  const [workflowsHasMore, setWorkflowsHasMore] = useState(true);
+  const [executionsList, setExecutionsList] = useState<ExecutionItem[]>([]);
+  const [executionsLastId, setExecutionsLastId] = useState(0);
+  const [executionsHasMore, setExecutionsHasMore] = useState(true);
 
   const [view, setView] = useState<"list" | "form">("list");
   const [tab, setTab] = useState<"workflows" | "executions">("workflows");
@@ -87,17 +122,34 @@ export function WorkflowsPage() {
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
 
+  const [wfSearch, setWfSearch] = useState("");
+  const [wfTimeFilter, setWfTimeFilter] = useState<TimeFilter>("all");
+  const [execSearch, setExecSearch] = useState("");
+  const [execTimeFilter, setExecTimeFilter] = useState<TimeFilter>("all");
+
   useEffect(() => {
-    list({ limit: 50, last_id: 0 });
+    list({ limit: PAGE_SIZE, last_id: 0 });
   }, [list]);
 
-  // Load execution counts for all workflows
   useEffect(() => {
     if (data?.workflows) {
-      data.workflows.forEach((w) => {
+      setWorkflowsMap((prev) => {
+        const next = new Map(prev);
+        data.workflows.forEach((w) => { if (w.id != null) next.set(w.id, w); });
+        return next;
+      });
+      const ids = data.workflows.map((w) => w.id).filter((id): id is number => id != null);
+      if (ids.length > 0) setWorkflowsLastId(Math.max(...ids));
+      setWorkflowsHasMore((data.workflows?.length ?? 0) >= PAGE_SIZE);
+    }
+  }, [data]);
+
+  useEffect(() => {
+    if (workflowsMap.size > 0) {
+      workflowsMap.forEach((w) => {
         if (w.id) {
           listExecutions(w.id, { limit: 1, last_id: 0 }).then((result) => {
-            setExecutionsMap((prev) => {
+            setExecutionsCountMap((prev) => {
               const next = new Map(prev);
               next.set(w.id!, result?.total ?? 0);
               return next;
@@ -106,14 +158,26 @@ export function WorkflowsPage() {
         }
       });
     }
-  }, [data, listExecutions]);
+  }, [workflowsMap, listExecutions]);
 
-  // Load all executions when executions tab is active
   useEffect(() => {
     if (tab === "executions") {
-      listAllExecutions({ limit: 100, last_id: 0 });
+      listAllExecutions({ limit: PAGE_SIZE, last_id: 0 });
     }
   }, [tab, listAllExecutions]);
+
+  useEffect(() => {
+    if (allExecutionsData?.executions) {
+      setExecutionsList((prev) => {
+        const byId = new Map(prev.map((e) => [e.id, e]));
+        allExecutionsData.executions.forEach((e) => byId.set(e.id, e as ExecutionItem));
+        return Array.from(byId.values()).sort((a, b) => b.id - a.id);
+      });
+      const ids = allExecutionsData.executions.map((e) => e.id).filter(Boolean);
+      if (ids.length > 0) setExecutionsLastId(Math.max(...ids));
+      setExecutionsHasMore((allExecutionsData.executions?.length ?? 0) >= PAGE_SIZE);
+    }
+  }, [allExecutionsData]);
 
   useEffect(() => {
     if (editingId != null) get(editingId);
@@ -251,12 +315,11 @@ export function WorkflowsPage() {
     try {
       await execute({ media: runMedia.trim(), id: String(runModal.workflowId) });
       setRunModal(null);
-      // Refresh execution count
       if (runModal.workflowId) {
         listExecutions(runModal.workflowId, { limit: 1, last_id: 0 }).then((result) => {
-          setExecutionsMap((prev) => {
+          setExecutionsCountMap((prev) => {
             const next = new Map(prev);
-            next.set(runModal.workflowId, result?.total ?? 0);
+            next.set(runModal!.workflowId, result?.total ?? 0);
             return next;
           });
         });
@@ -276,117 +339,256 @@ export function WorkflowsPage() {
     }
   };
 
-  const workflows = data?.workflows ?? [];
+  const allWorkflows = useMemo(
+    () => Array.from(workflowsMap.values()).sort((a, b) => (b.id ?? 0) - (a.id ?? 0)),
+    [workflowsMap]
+  );
+  const filteredWorkflows = useMemo(() => {
+    let out = filterByTime(allWorkflows, wfTimeFilter);
+    if (wfSearch.trim()) {
+      const q = wfSearch.trim().toLowerCase();
+      out = out.filter((w) => {
+        const name = (w.name ?? "").toLowerCase();
+        const id = String(w.id ?? "").toLowerCase();
+        return name.includes(q) || id.includes(q);
+      });
+    }
+    return out;
+  }, [allWorkflows, wfTimeFilter, wfSearch]);
+  const filteredExecutions = useMemo(() => {
+    let out = filterByTime(executionsList, execTimeFilter);
+    if (execSearch.trim()) {
+      const q = execSearch.trim().toLowerCase();
+      out = out.filter((e) => {
+        const name = (e.workflow_name ?? "").toLowerCase();
+        const id = String(e.id).toLowerCase();
+        const wfId = String(e.workflow_id).toLowerCase();
+        return name.includes(q) || id.includes(q) || wfId.includes(q);
+      });
+    }
+    return out;
+  }, [executionsList, execTimeFilter, execSearch]);
+
+  const loadMoreWorkflows = useCallback(() => {
+    list({ limit: PAGE_SIZE, last_id: workflowsLastId }).then((res) => {
+      if ((res?.workflows?.length ?? 0) < PAGE_SIZE) setWorkflowsHasMore(false);
+    });
+  }, [list, workflowsLastId]);
+  const loadMoreExecutions = useCallback(() => {
+    listAllExecutions({ limit: PAGE_SIZE, last_id: executionsLastId }).then((res) => {
+      if ((res?.executions?.length ?? 0) < PAGE_SIZE) setExecutionsHasMore(false);
+    });
+  }, [listAllExecutions, executionsLastId]);
+
+  const hasWfFilters = wfSearch !== "" || wfTimeFilter !== "all";
+  const hasExecFilters = execSearch !== "" || execTimeFilter !== "all";
+  const clearWfFilters = () => { setWfSearch(""); setWfTimeFilter("all"); };
+  const clearExecFilters = () => { setExecSearch(""); setExecTimeFilter("all"); };
 
   return (
-    <div className="container max-w-5xl mx-auto py-8 px-4">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Create multi-step edits and run them with any source media.
-        </p>
+    <div className="container max-w-6xl mx-auto py-8 px-4">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Create multi-step edits and run them with any source media.
+          </p>
+        </div>
+        <Button onClick={openCreate}>
+          <Plus className="size-4 mr-2" />
+          New workflow
+        </Button>
       </header>
 
       {error && <p className="text-sm text-destructive mb-4">{error.message}</p>}
 
       {view === "list" ? (
         <>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex gap-2 border-b">
-              <button
-                onClick={() => setTab("workflows")}
-                className={cn(
-                  "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
-                  tab === "workflows"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Workflows
-              </button>
-              <button
-                onClick={() => setTab("executions")}
-                className={cn(
-                  "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
-                  tab === "executions"
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Executions
-              </button>
-            </div>
-            <Button onClick={openCreate}>
-              <Plus className="size-4 mr-2" />
-              New workflow
-            </Button>
+          <div className="flex items-center gap-2 border-b mb-4">
+            <button
+              onClick={() => setTab("workflows")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
+                tab === "workflows"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Workflows
+            </button>
+            <button
+              onClick={() => setTab("executions")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px",
+                tab === "executions"
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Executions
+            </button>
           </div>
           {tab === "workflows" ? (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Workflows</CardTitle>
-              <CardDescription>Open to edit, or Run with a source video.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading…
+            <div className="flex flex-wrap items-center gap-2 py-2 px-4 border-b border-border">
+              <Input
+                placeholder="Search by name or ID…"
+                value={wfSearch}
+                onChange={(e) => setWfSearch(e.target.value)}
+                className="h-9 max-w-xs"
+              />
+              <select
+                value={wfTimeFilter}
+                onChange={(e) => setWfTimeFilter(e.target.value as TimeFilter)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {TIME_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              {hasWfFilters && (
+                <Button variant="ghost" size="sm" className="h-9 gap-1" onClick={clearWfFilters}>
+                  <X className="size-3.5" /> Clear filters
+                </Button>
+              )}
+            </div>
+            <CardContent className="p-0">
+              {loading && workflowsMap.size === 0 ? (
+                <TableSkeleton rows={8} columns={6} />
+              ) : filteredWorkflows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <p className="text-muted-foreground text-sm">
+                    {allWorkflows.length === 0 ? "No workflows yet" : "No workflows match your filters"}
+                  </p>
+                  {allWorkflows.length === 0 && (
+                    <Button className="mt-4" onClick={openCreate}>Create first workflow</Button>
+                  )}
+                  {allWorkflows.length > 0 && hasWfFilters && (
+                    <Button variant="outline" className="mt-4" onClick={clearWfFilters}>Clear filters</Button>
+                  )}
                 </div>
-              ) : workflows.length === 0 ? (
-                <p className="text-muted-foreground text-sm py-8">No workflows yet. Create one to get started.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b text-muted-foreground">
-                        <th className="pb-2 pr-4 font-medium text-center">Name</th>
-                        <th className="pb-2 pr-4 font-medium text-center">ID</th>
-                        <th className="pb-2 pr-4 font-medium text-center">Created</th>
-                        <th className="pb-2 pr-4 font-medium text-center">Steps</th>
-                        <th className="pb-2 pr-4 font-medium text-center">Executions</th>
-                        <th className="pb-2 font-medium text-center">Actions</th>
+                      <tr className="border-b border-border text-muted-foreground bg-muted/30">
+                        <th className="w-10 py-3 pl-4 pr-2 font-medium text-left">ID</th>
+                        <th className="py-3 px-2 font-medium text-left">Name</th>
+                        <th className="py-3 px-2 font-medium text-left">Steps</th>
+                        <th className="py-3 px-2 font-medium text-left">Executions</th>
+                        <th className="py-3 px-2 font-medium text-left">Created</th>
+                        <th className="py-3 pr-4 pl-2 font-medium text-right w-32">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {workflows.map((w) => (
-                        <tr key={w.id} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="py-2 pr-4 font-medium">{w.name ?? "—"}</td>
-                          <td className="py-2 pr-4 font-mono text-xs">{w.id}</td>
-                          <td className="py-2 pr-4 text-muted-foreground text-xs">
-                            {formatDate(w.created_at)}
+                      {filteredWorkflows.map((w) => (
+                        <tr key={w.id} className="border-b border-border hover:bg-muted/20">
+                          <td className="py-2 pl-4 pr-2">
+                            <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/50 px-2 py-0.5 font-mono text-xs" title={String(w.id)}>
+                              {w.id}
+                              <Copy className="size-3 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(String(w.id)); }} />
+                            </span>
                           </td>
-                          <td className="py-2 pr-4 text-muted-foreground">
-                            {Array.isArray(w.steps) ? w.steps.length : 0} steps
+                          <td className="py-2 px-2 font-medium">{w.name ?? "—"}</td>
+                          <td className="py-2 px-2 text-muted-foreground">{Array.isArray(w.steps) ? w.steps.length : 0} steps</td>
+                          <td className="py-2 px-2 text-muted-foreground">{executionsCountMap.get(w.id ?? 0) ?? 0} times</td>
+                          <td className="py-2 px-2 text-muted-foreground text-xs whitespace-nowrap" title={formatExact(w.created_at)}>{formatRelative(w.created_at)}</td>
+                          <td className="py-2 pr-4 pl-2 text-right">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(w.id!)} title="Edit">
+                                <Pencil className="size-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openRun(w.id!, w.name ?? "")} title="Run">
+                                <Play className="size-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(w.id!)} disabled={deleting} title="Delete">
+                                <Trash2 className="size-4" />
+                              </Button>
+                            </div>
                           </td>
-                          <td className="py-2 pr-4 text-muted-foreground text-center">
-                            {executionsMap.get(w.id ?? 0) ?? 0} times
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!loading && filteredWorkflows.length > 0 && workflowsHasMore && (
+                <div className="flex justify-center py-4 border-t border-border">
+                  <Button variant="outline" onClick={loadMoreWorkflows} disabled={loading}>Load more</Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          ) : (
+          <Card>
+            <div className="flex flex-wrap items-center gap-2 py-2 px-4 border-b border-border">
+              <Input
+                placeholder="Search by workflow name or ID…"
+                value={execSearch}
+                onChange={(e) => setExecSearch(e.target.value)}
+                className="h-9 max-w-xs"
+              />
+              <select
+                value={execTimeFilter}
+                onChange={(e) => setExecTimeFilter(e.target.value as TimeFilter)}
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {TIME_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              {hasExecFilters && (
+                <Button variant="ghost" size="sm" className="h-9 gap-1" onClick={clearExecFilters}>
+                  <X className="size-3.5" /> Clear filters
+                </Button>
+              )}
+            </div>
+            <CardContent className="p-0">
+              {loadingAllExecutions && executionsList.length === 0 ? (
+                <TableSkeleton rows={8} columns={6} />
+              ) : filteredExecutions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                  <p className="text-muted-foreground text-sm">
+                    {executionsList.length === 0 ? "No executions yet" : "No executions match your filters"}
+                  </p>
+                  {executionsList.length > 0 && hasExecFilters && (
+                    <Button variant="outline" className="mt-4" onClick={clearExecFilters}>Clear filters</Button>
+                  )}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-muted-foreground bg-muted/30">
+                        <th className="w-10 py-3 pl-4 pr-2 font-medium text-left">ID</th>
+                        <th className="py-3 px-2 font-medium text-left">Workflow</th>
+                        <th className="py-3 px-2 font-medium text-left">Progress</th>
+                        <th className="py-3 px-2 font-medium text-left">Created</th>
+                        <th className="py-3 pr-4 pl-2 font-medium text-right w-24">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredExecutions.map((exec) => (
+                        <tr key={exec.id} className="border-b border-border hover:bg-muted/20">
+                          <td className="py-2 pl-4 pr-2">
+                            <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/50 px-2 py-0.5 font-mono text-xs" title={String(exec.id)}>
+                              {exec.id}
+                              <Copy className="size-3 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(String(exec.id)); }} />
+                            </span>
                           </td>
-                          <td className="py-2 flex items-center gap-1">
+                          <td className="py-2 px-2 text-muted-foreground">{exec.workflow_name ?? `Workflow ${exec.workflow_id}`}</td>
+                          <td className="py-2 px-2 text-muted-foreground">{exec.progress ?? 0}%</td>
+                          <td className="py-2 px-2 text-muted-foreground text-xs whitespace-nowrap" title={formatExact(exec.created_at)}>{formatRelative(exec.created_at)}</td>
+                          <td className="py-2 pr-4 pl-2 text-right">
                             <Button
                               variant="ghost"
-                              size="xs"
-                              onClick={() => openEdit(w.id!)}
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => { setSelectedExecutionId(exec.id); fetchJobs(exec.id); }}
+                              disabled={loadingExecutionJobs && selectedExecutionId === exec.id}
+                              title="View jobs"
                             >
-                              <Pencil className="size-3.5 mr-1" />
-                              Open
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="xs"
-                              onClick={() => openRun(w.id!, w.name ?? "")}
-                            >
-                              <Play className="size-3.5 mr-1" />
-                              Run
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="xs"
-                              onClick={() => handleDelete(w.id!)}
-                              disabled={deleting}
-                            >
-                              <Trash2 className="size-3.5 mr-1" />
-                              Delete
+                              <Eye className="size-4" />
                             </Button>
                           </td>
                         </tr>
@@ -395,69 +597,10 @@ export function WorkflowsPage() {
                   </table>
                 </div>
               )}
-            </CardContent>
-          </Card>
-          ) : (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">All Executions</CardTitle>
-              <CardDescription>Execution history across all workflows.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {loadingAllExecutions ? (
-                <div className="flex items-center gap-2 text-muted-foreground text-sm py-8">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading…
+              {!loadingAllExecutions && filteredExecutions.length > 0 && executionsHasMore && (
+                <div className="flex justify-center py-4 border-t border-border">
+                  <Button variant="outline" onClick={loadMoreExecutions} disabled={loadingAllExecutions}>Load more</Button>
                 </div>
-              ) : allExecutionsData?.executions && allExecutionsData.executions.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-muted-foreground">
-                        <th className="pb-2 pr-4 font-medium text-center">ID</th>
-                        <th className="pb-2 pr-4 font-medium text-center">Workflow</th>
-                        <th className="pb-2 pr-4 font-medium text-center">Created</th>
-                        <th className="pb-2 pr-4 font-medium text-center">Updated</th>
-                        <th className="pb-2 font-medium text-center">Progress</th>
-                        <th className="pb-2 font-medium text-center">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allExecutionsData.executions.map((exec) => (
-                        <tr key={exec.id} className="border-b last:border-0 hover:bg-muted/30">
-                          <td className="py-2 pr-4 font-mono text-xs text-center">{exec.id}</td>
-                          <td className="py-2 pr-4 text-muted-foreground text-xs text-center">
-                            {exec.workflow_name ?? `Workflow ${exec.workflow_id}`}
-                          </td>
-                          <td className="py-2 pr-4 text-muted-foreground text-xs text-center">
-                            {formatDate(exec.created_at)}
-                          </td>
-                          <td className="py-2 pr-4 text-muted-foreground text-xs text-center">
-                            {formatDate(exec.updated_at)}
-                          </td>
-                          <td className="py-2 pr-4 text-muted-foreground text-center">
-                            {exec.progress ?? 0}%
-                          </td>
-                          <td className="py-2 pr-4 text-center">
-                            <Button
-                              variant="ghost"
-                              size="xs"
-                              onClick={() => {
-                                setSelectedExecutionId(exec.id);
-                                fetchJobs(exec.id);
-                              }}
-                              disabled={loadingExecutionJobs && selectedExecutionId === exec.id}
-                            >
-                              View
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-sm py-8">No executions yet.</p>
               )}
             </CardContent>
           </Card>
