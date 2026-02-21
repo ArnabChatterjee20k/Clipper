@@ -3,15 +3,17 @@
  * Backend uses status "error" and "cancelled" (not "failed").
  */
 
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useEditVideo, useJobStatus } from "@/hooks/use-clipper-api";
 import type { VideoEditRequest } from "@/types/edit-session";
-import { Loader2, CheckCircle, XCircle, FolderOpen } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, FolderOpen, Code } from "lucide-react";
 import { VideoPlayer } from "./VideoPlayer";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface SubmitAndStatusProps {
   toRequest: VideoEditRequest | null;
@@ -28,6 +30,7 @@ export function SubmitAndStatus({
 }: SubmitAndStatusProps) {
   const { edit, loading: submitting, error: submitError, data: editData } = useEditVideo();
   const { start, stop, job, loading: streaming } = useJobStatus();
+  const [showJson, setShowJson] = useState(false);
 
   useEffect(() => {
     if (editData?.id) {
@@ -55,25 +58,57 @@ export function SubmitAndStatus({
       ? String((job.output as { url?: string }).url)
       : null;
 
+  const jsonString = toRequest ? JSON.stringify(toRequest, null, 2) : "";
+
   return (
     <Card className={className}>
       <CardHeader>
         <CardTitle className="text-base">Run edit</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <Button
-          onClick={handleSubmit}
-          disabled={!canSubmit || submitting}
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="size-4 animate-spin" />
-              Submitting…
-            </>
-          ) : (
-            "Submit edit"
-          )}
-        </Button>
+        <div className="flex justify-center flex-wrap gap-2">
+          <Button
+            onClick={handleSubmit}
+            disabled={!canSubmit || submitting}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Submitting…
+              </>
+            ) : (
+              "Submit edit"
+            )}
+          </Button>
+
+          <Button
+            variant="outline"
+            onClick={() => setShowJson(true)}
+            disabled={!toRequest}
+          >
+            <Code className="size-4 mr-2" />
+            Get JSON
+          </Button>
+        </div>
+
+        <Dialog open={showJson} onOpenChange={setShowJson}>
+          <DialogContent title="Request JSON" className="max-w-2xl">
+            <div className="p-4">
+              <Textarea
+                readOnly
+                value={jsonString}
+                className="font-mono text-xs min-h-[300px] bg-muted/20"
+              />
+              <div className="flex justify-end mt-4">
+                <Button onClick={() => {
+                  navigator.clipboard.writeText(jsonString);
+                }}>
+                  Copy to clipboard
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
         {submitError && (
           <p className="text-sm text-destructive">{submitError.message}</p>
         )}

@@ -322,9 +322,6 @@ export function EditsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Edits</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Video edit jobs. View status, expand for details, retry or cancel.
-          </p>
         </div>
         <Button asChild>
           <Link to="/edit">

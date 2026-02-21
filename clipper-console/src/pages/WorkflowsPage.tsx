@@ -440,9 +440,6 @@ export function WorkflowsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Workflows</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Create multi-step edits and run them with any source media.
-          </p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="size-4 mr-2" />
