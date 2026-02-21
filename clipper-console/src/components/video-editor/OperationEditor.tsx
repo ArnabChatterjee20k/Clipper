@@ -6,6 +6,7 @@ import type {
   VideoOperation,
   TrimOp,
   KaraokeOp,
+  WordTiming,
   TextSequenceOp,
   TimedTextItem,
   TextOp,
@@ -153,12 +154,104 @@ function TrimEditor({ op, onChange }: { op: TrimOp; onChange: (op: TrimOp) => vo
   );
 }
 
-function KaraokeEditor({ op, onChange }: { op: KaraokeOp; onChange: (op: KaraokeOp) => void }) {
+function KaraokeEditor({ op, onChange }: { op: KaraokeOp; onChange: (op: VideoOperation) => void }) {
   const positionKey =
     (Object.entries(TEXT_POSITIONS).find(
       ([_, p]) => p.x === (op.x ?? "(w-text_w)/2") && p.y === (op.y ?? "h-200")
     )?.[0]) ?? CUSTOM_POSITION_KEY;
   const hasHighlightBackground = Boolean(op.boxcolor);
+  const start = op.start_sec ?? 0;
+  const end = op.end_sec ?? -1;
+  const durationValue = end === -1 ? "" : Math.max(0, Number((end - start).toFixed(2)));
+  const steps = op.words ?? [];
+
+  const updateStep = (index: number, patch: Partial<WordTiming>) => {
+    const next = steps.map((s, i) => (i === index ? { ...s, ...patch } : s));
+    onChange({ ...op, words: next });
+  };
+
+  const addStep = () => {
+    const fallbackEnd = end === -1 ? start + 0.5 : end;
+    onChange({
+      ...op,
+      words: [
+        ...steps,
+        {
+          word: "",
+          start_sec: start,
+          end_sec: fallbackEnd,
+        },
+      ],
+    });
+  };
+
+  const removeStep = (index: number) => {
+    const next = steps.filter((_, i) => i !== index);
+    onChange({ ...op, words: next.length ? next : undefined });
+  };
+
+  const autoFillStepsFromSentence = () => {
+    const tokens = op.sentence
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter(Boolean);
+    if (tokens.length === 0) return;
+
+    if (end === -1 || end <= start) {
+      const next = tokens.map((word, i) => ({
+        word,
+        start_sec: Number((start + i * 0.5).toFixed(2)),
+        end_sec: Number((start + (i + 1) * 0.5).toFixed(2)),
+      }));
+      onChange({ ...op, words: next });
+      return;
+    }
+
+    const chunk = (end - start) / tokens.length;
+    const next = tokens.map((word, i) => ({
+      word,
+      start_sec: Number((start + i * chunk).toFixed(2)),
+      end_sec: Number((start + (i + 1) * chunk).toFixed(2)),
+    }));
+    onChange({ ...op, words: next });
+  };
+
+  const convertStepsToFadeSequence = () => {
+    const sourceSteps =
+      steps.length > 0
+        ? steps
+        : op.sentence
+            .split(/\s+/)
+            .map((w) => w.trim())
+            .filter(Boolean)
+            .map((word, i) => ({
+              word,
+              start_sec: Number((start + i * 0.5).toFixed(2)),
+              end_sec: Number((start + (i + 1) * 0.5).toFixed(2)),
+            }));
+
+    if (sourceSteps.length === 0) return;
+
+    const fadeOp: TextSequenceOp = {
+      op: "textSequence",
+      items: sourceSteps.map((s) => ({
+        text: s.word,
+        start_sec: s.start_sec,
+        end_sec: s.end_sec,
+        fontsize: op.fontsize ?? 60,
+        x: op.x ?? "(w-text_w)/2",
+        y: op.y ?? "h-200",
+        fontcolor: op.fontcolor ?? "white",
+        boxcolor: op.boxcolor ?? "black@1.0",
+        boxborderw: op.boxborderw ?? 12,
+        background: Boolean(op.boxcolor),
+        fade_in_ms: 200,
+        fade_out_ms: 200,
+      })),
+    };
+
+    onChange(fadeOp);
+  };
 
   return (
     <div className="space-y-3">
@@ -171,7 +264,7 @@ function KaraokeEditor({ op, onChange }: { op: KaraokeOp; onChange: (op: Karaoke
           className="h-8"
         />
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <div className="space-y-1">
           <Label className="text-xs">Start (s)</Label>
           <Input
@@ -187,10 +280,31 @@ function KaraokeEditor({ op, onChange }: { op: KaraokeOp; onChange: (op: Karaoke
           <Label className="text-xs">End (s)</Label>
           <Input
             type="number"
+            min={-1}
+            step={0.1}
+            value={op.end_sec ?? -1}
+            onChange={(e) => onChange({ ...op, end_sec: Number(e.target.value) ?? -1 })}
+            placeholder="-1 = end"
+            className="h-8"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Duration (s)</Label>
+          <Input
+            type="number"
             min={0}
             step={0.1}
-            value={op.end_sec ?? 0}
-            onChange={(e) => onChange({ ...op, end_sec: Number(e.target.value) || 0 })}
+            value={durationValue}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "") {
+                onChange({ ...op, end_sec: -1 });
+                return;
+              }
+              const duration = Number(v);
+              onChange({ ...op, end_sec: Number((start + (Number.isFinite(duration) ? duration : 0)).toFixed(2)) });
+            }}
+            placeholder="-1 end -> blank"
             className="h-8"
           />
         </div>
@@ -320,8 +434,79 @@ function KaraokeEditor({ op, onChange }: { op: KaraokeOp; onChange: (op: Karaoke
           Enable highlight background
         </Label>
       </div>
+      <div className="space-y-2 rounded-lg border border-border/60 bg-muted/30 p-2">
+        <div className="flex items-center justify-between gap-2">
+          <Label className="text-xs">Word steps (animation timeline)</Label>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="xs" onClick={autoFillStepsFromSentence}>
+              Auto-fill from sentence
+            </Button>
+            <Button type="button" variant="outline" size="xs" onClick={convertStepsToFadeSequence}>
+              Convert steps to fade sequence
+            </Button>
+            <Button type="button" variant="outline" size="xs" onClick={addStep}>
+              <Plus className="size-3.5 mr-1" />
+              Add step
+            </Button>
+          </div>
+        </div>
+        {steps.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            No steps added. Backend auto-distributes timings between start and end.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {steps.map((step, index) => (
+              <div key={index} className="grid grid-cols-12 gap-2 items-end">
+                <div className="col-span-5 space-y-1">
+                  <Label className="text-xs">Step {index + 1} text</Label>
+                  <Input
+                    value={step.word}
+                    onChange={(e) => updateStep(index, { word: e.target.value })}
+                    placeholder="word or phrase"
+                    className="h-8"
+                  />
+                </div>
+                <div className="col-span-3 space-y-1">
+                  <Label className="text-xs">Start</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={step.start_sec}
+                    onChange={(e) => updateStep(index, { start_sec: Number(e.target.value) || 0 })}
+                    className="h-8"
+                  />
+                </div>
+                <div className="col-span-3 space-y-1">
+                  <Label className="text-xs">End</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.1}
+                    value={step.end_sec}
+                    onChange={(e) => updateStep(index, { end_sec: Number(e.target.value) || 0 })}
+                    className="h-8"
+                  />
+                </div>
+                <div className="col-span-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => removeStep(index)}
+                    aria-label="Remove step"
+                  >
+                    <Trash2 className="size-3.5 text-muted-foreground" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <p className="text-[11px] text-muted-foreground">
-        Word timing is auto-distributed between start and end.
+        Use steps to control word timings. Convert to fade sequence for per-word fade-in/out animation.
       </p>
     </div>
   );

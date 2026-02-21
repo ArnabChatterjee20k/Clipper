@@ -219,7 +219,7 @@ export const defaultKaraokeOp: KaraokeOp = {
   op: "karaoke",
   sentence: "",
   start_sec: 0,
-  end_sec: 2,
+  end_sec: -1,
   fontsize: 60,
   x: "(w-text_w)/2",
   y: "h-200",

@@ -22,6 +22,80 @@ export interface SubmitAndStatusProps {
   className?: string;
 }
 
+function normalizeKaraokeAndSubmitPayload(payload: VideoEditRequest): VideoEditRequest {
+  const operations = payload.operations.map((op) => {
+    if (op.op !== "karaoke") return op;
+
+    const raw = op as VideoEditRequest["operations"][number] & {
+      sentence?: unknown;
+      start_sec?: unknown;
+      end_sec?: unknown;
+      duration?: unknown;
+      words?: unknown;
+    };
+
+    const sentence =
+      typeof raw.sentence === "string" ? raw.sentence.trim() : "";
+    const tokens = sentence.split(/\s+/).filter(Boolean);
+    const start = typeof raw.start_sec === "number" && Number.isFinite(raw.start_sec) ? raw.start_sec : 0;
+    const duration =
+      typeof raw.duration === "number" && Number.isFinite(raw.duration) && raw.duration > 0
+        ? raw.duration
+        : null;
+    const endInput = typeof raw.end_sec === "number" && Number.isFinite(raw.end_sec) ? raw.end_sec : -1;
+
+    const inputWords = Array.isArray(raw.words)
+      ? raw.words
+          .map((w) => {
+            if (!w || typeof w !== "object" || Array.isArray(w)) return null;
+            const item = w as { word?: unknown; start_sec?: unknown; end_sec?: unknown };
+            if (
+              typeof item.word !== "string" ||
+              typeof item.start_sec !== "number" ||
+              typeof item.end_sec !== "number"
+            ) {
+              return null;
+            }
+            return {
+              word: item.word,
+              start_sec: item.start_sec,
+              end_sec: item.end_sec,
+            };
+          })
+          .filter((w): w is { word: string; start_sec: number; end_sec: number } => Boolean(w))
+      : [];
+
+    const fallbackEndFromTokens = tokens.length > 0 ? start + tokens.length * 0.6 : start + 2;
+    let resolvedEnd = duration != null ? start + duration : endInput;
+    if (resolvedEnd === -1) resolvedEnd = fallbackEndFromTokens;
+    if (resolvedEnd <= start) resolvedEnd = fallbackEndFromTokens;
+
+    const words =
+      inputWords.length > 0
+        ? inputWords
+        : tokens.length > 0
+          ? tokens.map((word, i) => {
+              const seg = (resolvedEnd - start) / tokens.length;
+              return {
+                word,
+                start_sec: Number((start + i * seg).toFixed(2)),
+                end_sec: Number((start + (i + 1) * seg).toFixed(2)),
+              };
+            })
+          : [];
+
+    return {
+      ...op,
+      sentence,
+      start_sec: Number(start.toFixed(2)),
+      end_sec: Number(resolvedEnd.toFixed(2)),
+      words: words.length > 0 ? words : undefined,
+    };
+  });
+
+  return { ...payload, operations };
+}
+
 export function SubmitAndStatus({
   toRequest,
   canSubmit,
@@ -48,7 +122,7 @@ export function SubmitAndStatus({
 
   const handleSubmit = () => {
     if (!toRequest) return;
-    edit(toRequest);
+    edit(normalizeKaraokeAndSubmitPayload(toRequest));
   };
 
   const handleOpenPasteJson = () => {
@@ -94,11 +168,12 @@ export function SubmitAndStatus({
       }
 
       setJsonInputError(null);
-      edit({
+      const payload = {
         ...(parsed as VideoEditRequest),
         media: media.trim(),
         operations: operations as VideoEditRequest["operations"],
-      });
+      };
+      edit(normalizeKaraokeAndSubmitPayload(payload));
       setShowPasteJson(false);
     } catch (e) {
       setJsonInputError(e instanceof Error ? e.message : "Invalid JSON");
@@ -116,6 +191,13 @@ export function SubmitAndStatus({
       : null;
 
   const jsonString = toRequest ? JSON.stringify(toRequest, null, 2) : "";
+  const isProcessing =
+    job?.status === "processing" || job?.status === "running" || job?.status === "queued";
+  const rawProgress = job?.progress ?? job?.percent;
+  const progress =
+    typeof rawProgress === "number" && Number.isFinite(rawProgress)
+      ? Math.max(0, Math.min(100, Math.round(rawProgress)))
+      : null;
 
   return (
     <Card className={className}>
@@ -219,6 +301,20 @@ export function SubmitAndStatus({
             {job && (
               <>
                 <JobStatusBadge status={job.status} />
+                {isProcessing && progress !== null && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Progress</span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full bg-primary transition-all duration-300"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {job.status === "completed" && outputFilename && (
                   <div className="pt-2 border-t space-y-2">
                     {outputUrl ? (

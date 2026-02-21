@@ -114,7 +114,7 @@ export function OperationList({
     setSelectValue(ADD_PLACEHOLDER);
     const helpers: Record<string, () => void> = {
       trim: addTrim ?? (() => onAdd({ op: "trim", start_sec: 0, end_sec: -1 })),
-      karaoke: addKaraoke ?? (() => onAdd({ op: "karaoke", sentence: "", start_sec: 0, end_sec: 2, fontsize: 60, x: "(w-text_w)/2", y: "h-200", fontcolor: "white", highlight_fontcolor: "yellow", boxcolor: "black@1.0", boxborderw: 12 })),
+      karaoke: addKaraoke ?? (() => onAdd({ op: "karaoke", sentence: "", start_sec: 0, end_sec: -1, fontsize: 60, x: "(w-text_w)/2", y: "h-200", fontcolor: "white", highlight_fontcolor: "yellow", boxcolor: "black@1.0", boxborderw: 12 })),
       textSequence: addTextSequence ?? (() => onAdd({ op: "textSequence", items: [{ text: "First line", start_sec: 0, end_sec: 2, fontsize: 60, x: "(w-text_w)/2", y: "h-200", fontcolor: "white", background: false, boxcolor: "black@1.0", boxborderw: 12, fade_in_ms: 200, fade_out_ms: 200 }] })),
       text: addText ?? (() => onAdd({ op: "text", segment: [{ start_sec: 0, end_sec: -1, text: "" }] })),
       speed: addSpeed ? () => addSpeed(1) : () => onAdd({ op: "speed", segment: [{ start_sec: 0, end_sec: -1, speed: 1 }] }),

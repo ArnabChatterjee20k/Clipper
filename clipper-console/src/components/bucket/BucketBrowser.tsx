@@ -12,6 +12,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
   Upload,
+  FileVideo,
   ExternalLink,
   Trash2,
   Loader2,
@@ -193,13 +194,9 @@ function FileCard({
   return (
     <Card className="overflow-hidden group">
       <div className="aspect-video bg-muted/50 relative flex items-center justify-center">
-        <video
-          src={file.url}
-          className="w-full h-full object-contain"
-          muted
-          preload="metadata"
-          playsInline
-        />
+        <div className="flex h-full w-full items-center justify-center bg-muted/40">
+          <FileVideo className="size-10 text-muted-foreground" />
+        </div>
         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
           <Button
             variant="secondary"

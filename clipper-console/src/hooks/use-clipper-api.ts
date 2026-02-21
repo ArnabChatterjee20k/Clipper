@@ -75,6 +75,8 @@ export interface JobUpdate {
   input?: string;
   action?: unknown;
   status?: string;
+  progress?: number;
+  percent?: number;
   updated_at?: string;
   output?: { filename?: string; url?: string; [k: string]: unknown };
 }
