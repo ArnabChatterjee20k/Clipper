@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { useEditVideo, useJobStatus } from "@/hooks/use-clipper-api";
 import type { VideoEditRequest } from "@/types/edit-session";
 import { Loader2, CheckCircle, XCircle, FolderOpen } from "lucide-react";
+import { VideoPlayer } from "./VideoPlayer";
 
 export interface SubmitAndStatusProps {
   toRequest: VideoEditRequest | null;
@@ -44,9 +45,15 @@ export function SubmitAndStatus({
     edit(toRequest);
   };
 
-  const outputFilename = job?.output && typeof job.output === "object" && "filename" in job.output
-    ? String((job.output as { filename?: string }).filename)
-    : null;
+  const outputFilename =
+    job?.output && typeof job.output === "object" && "filename" in job.output
+      ? String((job.output as { filename?: string }).filename)
+      : null;
+
+  const outputUrl =
+    job?.output && typeof job.output === "object" && "url" in job.output
+      ? String((job.output as { url?: string }).url)
+      : null;
 
   return (
     <Card className={className}>
@@ -81,9 +88,15 @@ export function SubmitAndStatus({
               <>
                 <JobStatusBadge status={job.status} />
                 {job.status === "completed" && outputFilename && (
-                  <div className="pt-2 border-t">
-                    <p className="text-xs text-muted-foreground">Output: {outputFilename}</p>
-                    <Button variant="outline" size="sm" className="mt-2" asChild>
+                  <div className="pt-2 border-t space-y-2">
+                    {outputUrl ? (
+                      <VideoPlayer url={outputUrl} filename={outputFilename} />
+                    ) : (
+                      <p className="text-xs text-muted-foreground break-all">
+                        Output: {outputFilename}
+                      </p>
+                    )}
+                    <Button variant="outline" size="sm" className="mt-1" asChild>
                       <Link to="/buckets">
                         <FolderOpen className="size-4" />
                         View in Buckets

@@ -2,7 +2,7 @@
  * List of past edits (jobs) with View / Retry / Cancel. Detail modal shows full edit and operation summary.
  */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import {
   useListEdits,
   useGetEdit,
@@ -13,6 +13,7 @@ import {
   type JobUpdate,
 } from "@/hooks/use-clipper-api";
 import { OperationSummary } from "@/components/video-editor";
+import { VideoPlayer } from "@/components/video-editor/VideoPlayer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -311,7 +312,19 @@ function EditDetailDialog({
   const [showJson, setShowJson] = useState(false);
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const output = edit?.output as { filename?: string } | undefined;
+  
+  // Safely extract output with URL
+  const output = useMemo(() => {
+    if (!edit?.output) return undefined;
+    if (typeof edit.output === "object" && edit.output !== null && !Array.isArray(edit.output)) {
+      const out = edit.output as { filename?: string; url?: string; [k: string]: unknown };
+      return {
+        filename: out.filename,
+        url: out.url,
+      };
+    }
+    return undefined;
+  }, [edit?.output]);
 
   useEffect(() => {
     if (edit && showJson) {
@@ -435,8 +448,19 @@ function EditDetailDialog({
                 )}
                 {output?.filename && (
                   <div>
-                    <p className="text-muted-foreground text-xs mb-1">Output</p>
-                    <p className="text-xs font-mono">{output.filename}</p>
+                    <p className="text-muted-foreground text-xs mb-2">Output</p>
+                    {output.url && output.filename ? (
+                      <VideoPlayer url={output.url} filename={output.filename} maxHeight="max-h-96" />
+                    ) : (
+                      <div className="space-y-1">
+                        <p className="text-xs font-mono break-all">{output.filename}</p>
+                        {output.url && (
+                          <p className="text-xs text-muted-foreground break-all">
+                            URL: <a href={output.url} target="_blank" rel="noreferrer" className="underline">{output.url}</a>
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 <div>

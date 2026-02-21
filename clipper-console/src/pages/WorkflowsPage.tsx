@@ -31,6 +31,7 @@ import {
   defaultDownloadFromYouTubeOp,
 } from "@/types/edit-session";
 import { OperationList } from "@/components/video-editor";
+import { VideoPlayer } from "@/components/video-editor/VideoPlayer";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -597,14 +598,26 @@ export function WorkflowsPage() {
           <CardContent>
             <p className="text-xs text-muted-foreground">UID: {execResult.workflows[0].uid}</p>
             {job && (
-              <p className="text-sm mt-1">
-                Status: <span className="font-medium">{job.status}</span>
+              <div className="mt-2 space-y-2">
+                <p className="text-sm">
+                  Status: <span className="font-medium">{job.status}</span>
+                </p>
                 {job.output && typeof job.output === "object" && "filename" in job.output && (
-                  <span className="block text-muted-foreground text-xs mt-1">
-                    Output: {String((job.output as { filename?: string }).filename)}
-                  </span>
+                  <div className="pt-2 border-t">
+                    {job.output && typeof job.output === "object" && "url" in job.output ? (
+                      <VideoPlayer
+                        url={String((job.output as { url?: string }).url)}
+                        filename={String((job.output as { filename?: string }).filename)}
+                        maxHeight="max-h-64"
+                      />
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Output: {String((job.output as { filename?: string }).filename)}
+                      </p>
+                    )}
+                  </div>
                 )}
-              </p>
+              </div>
             )}
           </CardContent>
         </Card>

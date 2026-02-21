@@ -76,7 +76,7 @@ export interface JobUpdate {
   action?: unknown;
   status?: string;
   updated_at?: string;
-  output?: { filename?: string; [k: string]: unknown };
+  output?: { filename?: string; url?: string; [k: string]: unknown };
 }
 
 export function useUploadFile() {

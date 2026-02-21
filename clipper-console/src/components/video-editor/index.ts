@@ -4,3 +4,4 @@ export { OperationEditor } from "./OperationEditor";
 export { OperationSummary } from "./OperationSummary";
 export { SubmitAndStatus } from "./SubmitAndStatus";
 export { VideoEditView } from "./VideoEditView";
+export { VideoPlayer } from "./VideoPlayer";
