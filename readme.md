@@ -2,7 +2,13 @@
 
 A local-first media editor API for editing images and videos via HTTP. Upload media to object storage, define edit pipelines (trim, compress, text overlays, watermarks, and more), and process them through a worker queue—all running on your own infrastructure.
 
----
+A generated Video using clipper (Might be muted due to md)
+
+<video controls width="600">
+  <source src="scripts/clipper.mp4" type="video/mp4">
+</video>
+
+🔊 If audio doesn't play, [download the video](scripts/clipper.mp4).
 
 ## What is Clipper?
 
@@ -26,6 +32,7 @@ Everything runs locally or in Docker. No cloud lock-in, no auth layer by design�
 - **Streamable output** — Outputs use Matroska for streaming where applicable; MP4 transcoding is supported via the `transcode` op.
 - **Rich video ops** — Karaoke-style word-by-word subtitles, timed text sequences, background audio, watermarks, speed segments, GIF export, and more.
 
+  ![Dashbaord](<scripts/Screenshot 2026-02-22 at 3.31.54 PM.png>)
 ---
 
 ## Architecture
@@ -149,6 +156,23 @@ See the in-app **API** page for example `curl` commands.
 
 ---
 
+## AI-Driven Video Generation (JSON Mutation)
+
+Clipper is designed to be AI-native.
+Instead of editing timelines manually, videos are defined as structured JSON edit specifications. This makes them easy for AI models to generate, modify, and optimize.
+
+An AI does not edit pixels — it mutates the edit JSON.
+```json
+{
+  "media": "input.mp4",
+  "operations": [
+    { "op": "trim", "start": 2, "end": 12 },
+    { "op": "text", "text": "Hello from Clipper", "start": 3, "end": 6 },
+    { "op": "compress", "preset": "medium" }
+  ]
+}
+```
+
 ## Examples
 
 ### AI code editors & programmatic video generation
@@ -179,9 +203,5 @@ curl -X POST 'http://localhost:8002/edits' \
 - [ ] Best frame extractor
 - [ ] AI editing
 - [ ] Deletion queue
-
+- [ ] Fix pagination issue in the edits page
 ---
-
-## License
-
-See repository for license details.
