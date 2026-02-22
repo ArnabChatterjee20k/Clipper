@@ -39,6 +39,7 @@ export function VideoEditView() {
     addConcat,
     addExtractAudio,
     addGif,
+    addConvertToPlatform,
   } = useEditSession();
 
   return (
@@ -96,6 +97,7 @@ export function VideoEditView() {
                   addConcat={addConcat}
                   addExtractAudio={addExtractAudio}
                   addGif={addGif}
+                  addConvertToPlatform={addConvertToPlatform}
                 />
               </CardContent>
             </Card>

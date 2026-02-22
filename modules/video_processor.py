@@ -270,6 +270,22 @@ class GifOptions(BaseModel):
     output_codec: str = "gif"
 
 
+class ConvertToPlatformOptions(BaseModel):
+    """Options for converting Matroska/streamable output to platform-ready MP4.
+    LinkedIn, Instagram, etc. require standard MP4 with moov atom at start (+faststart)
+    rather than fragmented MP4. This op transcodes the internal Matroska to MP4.
+    """
+
+    platform: Optional[str] = None  # "linkedin", "instagram", "youtube", "generic"
+    codec: str = "libx264"
+    preset: str = "medium"
+    crf: int = 23
+    audio_codec: str = "aac"
+    audio_bitrate: Optional[str] = "128k"
+    # Platform-specific max resolution (optional); e.g. "1080:1920" for Instagram Reels
+    scale: Optional[str] = None
+
+
 @dataclass
 class OperationSpec:
     """Declarative spec for a builder operation. Every op uses a single 'data' key."""
@@ -319,6 +335,80 @@ def _build_concat_manifest(paths: list[str]) -> str:
         escaped = (p or "").replace("'", "'\\''")
         lines.append(f"file '{escaped}'")
     return "\n".join(lines) + "\n"
+
+
+def _convert_tmp_paths() -> tuple[str, str]:
+    """Return (host_dir, container_dir) for convert temp files.
+    When running on host with docker exec, media/ is mounted at /code/media in container.
+    When in production (in container), both are the same path.
+    """
+    env_mode = os.getenv("CLIPPER_ENV", "").lower()
+    is_in_container = env_mode == "production"
+    convert_dir = os.path.join("media", "convert_tmp", uuid.uuid4().hex)
+    if is_in_container:
+        host_dir = os.path.abspath(convert_dir)
+        return host_dir, host_dir
+    host_dir = os.path.abspath(convert_dir)
+    container_dir = f"/code/{convert_dir}"
+    return host_dir, container_dir
+
+
+def _convert_to_platform_mp4_sync(
+    mkv_bytes: bytes, opts: "ConvertToPlatformOptions"
+) -> bytes:
+    """Convert Matroska bytes to platform-ready MP4 with +faststart.
+    Requires temp files because +faststart needs seekable output.
+    Uses media/convert_tmp so paths work when ffmpeg runs in docker (media is mounted).
+    """
+    host_dir, container_dir = _convert_tmp_paths()
+    os.makedirs(host_dir, exist_ok=True)
+    try:
+        path_in_host = os.path.join(host_dir, "input.mkv")
+        path_out_host = os.path.join(host_dir, "output.mp4")
+        path_in_cmd = os.path.join(container_dir, "input.mkv")
+        path_out_cmd = os.path.join(container_dir, "output.mp4")
+        with open(path_in_host, "wb") as f:
+            f.write(mkv_bytes)
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-i",
+            path_in_cmd,
+            "-c:v",
+            opts.codec,
+            "-preset",
+            opts.preset,
+            "-crf",
+            str(opts.crf),
+            "-c:a",
+            opts.audio_codec,
+            "-movflags",
+            "+faststart",
+            "-f",
+            "mp4",
+            path_out_cmd,
+        ]
+        if opts.audio_bitrate:
+            cmd.extend(["-b:a", opts.audio_bitrate])
+        if opts.scale:
+            cmd.extend(["-vf", f"scale={opts.scale}"])
+        subprocess.run(get_cmd(cmd), check=True, capture_output=True, timeout=3600)
+        with open(path_out_host, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            for name in ("input.mkv", "output.mp4"):
+                p = os.path.join(host_dir, name)
+                if os.path.exists(p):
+                    os.unlink(p)
+            os.rmdir(host_dir)
+        except OSError:
+            pass
+
+
+# Pipeline always outputs Matroska (streamable); ConvertToPlatform then transcodes to MP4
+# with +faststart for LinkedIn, Instagram, etc. Standard MP4 can't stream to pipe:1.
+_PIPELINE_VIDEO_FORMAT = VideoFormat.MATROSKA
 
 
 # make sure to pass -f in the command to determine the output type as we are not passing output externally
@@ -645,6 +735,10 @@ class VideoBuilder:
             method="create_gif",
             model=GifOptions,
         ),
+        "convertToPlatform": OperationSpec(
+            method="convert_to_platform",
+            model=ConvertToPlatformOptions,
+        ),
     }
 
     def __init__(
@@ -675,6 +769,7 @@ class VideoBuilder:
         self._background_color: Optional[BackgroundColor] = None
         self._transcode: Optional[TranscodeOptions] = None
         self._gif_options: Optional[GifOptions] = None
+        self._convert_to_platform: Optional[ConvertToPlatformOptions] = None
 
     @staticmethod
     def get_video_info(input_path: str) -> VideoInfo:
@@ -724,6 +819,11 @@ class VideoBuilder:
             return VideoInfo(error=f"ffprobe timeout: {e}")
         except Exception as e:
             return VideoInfo(error=str(e))
+
+    @property
+    def effective_output_ext(self) -> str:
+        """Output file extension: mp4 when convertToPlatform is set, else mkv."""
+        return "mp4" if self._convert_to_platform is not None else "mkv"
 
     @property
     def chunk_size(self) -> int:
@@ -906,6 +1006,18 @@ class VideoBuilder:
     def create_gif(self, options: GifOptions) -> "VideoBuilder":
         """Set GIF export options. When set, export_to_bytes() produces an animated GIF."""
         self._gif_options = options
+        return self
+
+    def convert_to_platform(
+        self, options: Optional[ConvertToPlatformOptions] = None, **kwargs: Any
+    ) -> "VideoBuilder":
+        """Convert internal Matroska output to platform-ready MP4 (LinkedIn, Instagram, etc).
+        Uses +faststart so moov atom is at the start for streaming/upload compatibility.
+        """
+        if options is not None:
+            self._convert_to_platform = options
+        else:
+            self._convert_to_platform = ConvertToPlatformOptions(**kwargs)
         return self
 
     def _karaoke_media_paths(self) -> tuple[str, str]:
@@ -1388,23 +1500,23 @@ class VideoBuilder:
             or opts.target_size_mb is not None
             or opts.scale is not None
         )
+        # Pipeline outputs Matroska (streamable to pipe); ConvertToPlatform transcodes to MP4
+        pipeline_format = _PIPELINE_VIDEO_FORMAT
         if not has_filters:
-            return [
+            cmd = [
                 ffmpeg,
                 "-i",
                 self.input_path,
                 "-c",
                 "copy",
                 "-f",
-                self._video_format.value,
-                "-movflags",
-                "+frag_keyframe+empty_moov",
+                pipeline_format.value,
             ]
+            return cmd
         extra_inputs, filter_complex = self._build_filter_complex(
             info.duration, info.width, info.height, opts.scale
         )
         duration_sec = info.duration or 1.0
-        movflags = opts.movflags or "+frag_keyframe+empty_moov"
         cmd_parts = [
             ffmpeg,
             "-i",
@@ -1423,9 +1535,7 @@ class VideoBuilder:
             "-c:a",
             opts.audio_codec,
             "-f",
-            self._video_format.value,
-            "-movflags",
-            movflags,
+            pipeline_format.value,
         ]
         if opts.target_size_mb is not None and opts.target_size_mb > 0:
             target_bitrate = int((opts.target_size_mb * 8192) / duration_sec) - 128
@@ -1512,11 +1622,18 @@ class VideoBuilder:
             yield chunk
 
     async def export_to_bytes(self) -> bytes:
-        """Run export and return the whole output as bytes (full video in memory)."""
+        """Run export and return the whole output as bytes (full video in memory).
+        Pipeline outputs Matroska; if convertToPlatform is set, transcodes to MP4 with +faststart.
+        """
         result = bytearray()
         async for chunk in self.export():
             result.extend(chunk)
-        return bytes(result)
+        out = bytes(result)
+        if self._convert_to_platform is not None:
+            out = await asyncio.to_thread(
+                _convert_to_platform_mp4_sync, out, self._convert_to_platform
+            )
+        return out
 
     async def extract_audio(self) -> AsyncGenerator[bytes, None]:
         """Extract audio using builder trim/speed and constructor audio_format/audio_bitrate. Streams chunks."""

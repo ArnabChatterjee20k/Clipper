@@ -32,6 +32,7 @@ import {
   defaultExtractAudioOp,
   defaultGifOp,
   defaultDownloadFromYouTubeOp,
+  defaultConvertToPlatformOp,
 } from "@/types/edit-session";
 import { OperationList } from "@/components/video-editor";
 import { VideoPlayer } from "@/components/video-editor/VideoPlayer";
@@ -1030,6 +1031,7 @@ function WorkflowStepEditor({
       addExtractAudio={() => addOp(defaultExtractAudioOp)}
       addGif={() => addOp(defaultGifOp)}
       addDownloadFromYouTube={() => addOp(defaultDownloadFromYouTubeOp)}
+      addConvertToPlatform={() => addOp(defaultConvertToPlatformOp)}
     />
   );
 }

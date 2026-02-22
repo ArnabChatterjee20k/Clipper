@@ -179,6 +179,8 @@ class Worker:
                 ext = audio_ext_map.get(getattr(builder, "_audio_format", ""), "mp3")
             elif getattr(builder, "_gif_options", None) is not None:
                 ext = "gif"
+            elif hasattr(builder, "effective_output_ext"):
+                ext = builder.effective_output_ext
             elif not ext or ext == "":
                 ext = "mp4"
 
@@ -217,7 +219,9 @@ class Worker:
                                     builder._audio_bitrate if builder else "192k"
                                 ),
                                 video_format=(
-                                    builder._video_format if builder else "mp4"
+                                    builder.effective_output_ext
+                                    if (builder and hasattr(builder, "effective_output_ext"))
+                                    else (builder._video_format if builder else "mp4")
                                 ),
                                 audio_format=(
                                     builder._audio_format if builder else "aac"

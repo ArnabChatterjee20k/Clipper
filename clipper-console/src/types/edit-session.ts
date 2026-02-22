@@ -177,6 +177,18 @@ export interface DownloadFromYouTubeOp {
   audio_only?: boolean;
 }
 
+/** Convert to platform-ready MP4 (LinkedIn, Instagram, etc). Transcodes Matroska to MP4 with +faststart. */
+export interface ConvertToPlatformOp {
+  op: "convertToPlatform";
+  platform?: string | null;
+  codec?: string;
+  preset?: string;
+  crf?: number;
+  audio_codec?: string;
+  audio_bitrate?: string | null;
+  scale?: string | null;
+}
+
 /** Single operation in the pipeline (discriminated by op) */
 export type VideoOperation =
   | TrimOp
@@ -192,7 +204,8 @@ export type VideoOperation =
   | ConcatOp
   | ExtractAudioOp
   | GifOp
-  | DownloadFromYouTubeOp;
+  | DownloadFromYouTubeOp
+  | ConvertToPlatformOp;
 
 /** Request body for POST /edits. media must be presigned URL. */
 export interface VideoEditRequest {
@@ -322,4 +335,14 @@ export const defaultDownloadFromYouTubeOp: DownloadFromYouTubeOp = {
   quality: "best",
   format: null,
   audio_only: false,
+};
+
+export const defaultConvertToPlatformOp: ConvertToPlatformOp = {
+  op: "convertToPlatform",
+  platform: "generic",
+  codec: "libx264",
+  preset: "medium",
+  crf: 23,
+  audio_codec: "aac",
+  audio_bitrate: "128k",
 };

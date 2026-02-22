@@ -76,12 +76,14 @@ option for converting the output type as well in video
 
 * finish -> envs and dockerization of the app , minio spelling
 
-### Issue with mp4
-We can't stream mp4 (can't use pipe:1) as a result we need to get the video first
-So either we need this "+frag_keyframe+empty_moov" which makes it feel like a live stream
-Or use a matroska format
+### Issue with mp4 (solved)
+We can't stream mp4 (can't use pipe:1) as a result we need to get the video first.
+So either we need this "+frag_keyframe+empty_moov" which makes it feel like a live stream,
+or use a matroska format.
 
-Idea is to always output a matroska format and then transcode that to mp4
+**Solution implemented:** The pipeline always outputs Matroska (streamable to pipe).
+Add the `convertToPlatform` operation as the last step to transcode to MP4 with
+`+faststart` for upload compatibility on LinkedIn, Instagram, YouTube, etc.
 
 ### FFMPEG guide
 http://img.ly/blog/ultimate-guide-to-ffmpeg/

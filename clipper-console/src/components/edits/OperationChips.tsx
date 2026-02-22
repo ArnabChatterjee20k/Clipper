@@ -48,6 +48,7 @@ function opToLabel(item: ActionItem): string {
   if (op === "concat") return "Concat";
   if (op === "extractAudio") return "Extract audio";
   if (op === "gif") return "GIF";
+  if (op === "convertToPlatform") return "Convert to platform";
   return op.charAt(0).toUpperCase() + op.slice(1).replace(/_/g, " ");
 }
 

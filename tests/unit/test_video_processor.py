@@ -104,25 +104,20 @@ class TestResolveEndSec:
 
 class TestExportNoFilters:
     def test_copy_no_filter_complex(self, default_info):
+        """Pipeline always outputs matroska (streamable) for copy path; no movflags (mp4-specific)."""
         b = VideoBuilder("input.mp4")
         cmd = b._build(default_info)
         assert_cmd_starts_with_ffmpeg_input(cmd, "input.mp4")
         assert cmd_get(cmd, "-c") == "copy"
-        assert cmd_get(cmd, "-f") == "mp4"
+        assert cmd_get(cmd, "-f") == "matroska"
         assert "-filter_complex" not in cmd
 
-    @pytest.mark.parametrize(
-        "video_format,expected_f",
-        [
-            (VideoFormat.MP4, "mp4"),
-            (VideoFormat.MATROSKA, "matroska"),
-            (VideoFormat.WEBM, "webm"),
-        ],
-    )
-    def test_video_format_reflected_in_f(self, default_info, video_format, expected_f):
-        b = VideoBuilder("in.mov", video_format=video_format)
-        cmd = b._build(default_info)
-        assert cmd_get(cmd, "-f") == expected_f
+    def test_pipeline_always_outputs_matroska(self, default_info):
+        """Pipeline always outputs matroska for streamability; use convertToPlatform for MP4."""
+        for vf in (VideoFormat.MP4, VideoFormat.MATROSKA, VideoFormat.WEBM):
+            b = VideoBuilder("in.mov", video_format=vf)
+            cmd = b._build(default_info)
+            assert cmd_get(cmd, "-f") == "matroska"
 
 
 # --- Export: trim ---
@@ -668,6 +663,17 @@ class TestBuilderLoad:
         assert fc is not None
         assert "weights='1 0.8'" in fc
 
+    def test_load_convert_to_platform(self):
+        """load(convertToPlatform) sets _convert_to_platform and effective_output_ext is mp4."""
+        b = VideoBuilder("input.mp4").load("convertToPlatform", data={})
+        assert b._convert_to_platform is not None
+        assert b.effective_output_ext == "mp4"
+
+    def test_effective_output_ext_without_convert_to_platform(self):
+        """Without convertToPlatform, effective_output_ext is mkv (matroska)."""
+        b = VideoBuilder("input.mp4")
+        assert b.effective_output_ext == "mkv"
+
 
 # --- Builder chaining ---
 
@@ -702,6 +708,11 @@ class TestBuilderChaining:
         opts = GifOptions(start_time="00:00:01", duration=5, fps=10, scale=480)
         assert b.create_gif(opts) is b
         assert b._gif_options is opts
+
+    def test_convert_to_platform_returns_self(self):
+        b = VideoBuilder("x.mp4")
+        assert b.convert_to_platform() is b
+        assert b._convert_to_platform is not None
 
 
 # --- GIF ---

@@ -38,6 +38,7 @@ const OP_TYPES: { value: VideoOperation["op"]; label: string }[] = [
   { value: "extractAudio", label: "Extract audio" },
   { value: "gif", label: "GIF" },
   { value: "download_from_youtube", label: "Download from YouTube" },
+  { value: "convertToPlatform", label: "Convert to platform (LinkedIn, Instagram, etc)" },
 ];
 
 const OP_LABELS: Record<string, string> = {
@@ -55,6 +56,7 @@ const OP_LABELS: Record<string, string> = {
   extractAudio: "Extract audio",
   gif: "GIF",
   download_from_youtube: "Download from YouTube",
+  convertToPlatform: "Convert to platform",
 };
 
 export interface OperationListProps {
@@ -76,6 +78,7 @@ export interface OperationListProps {
   addExtractAudio?: () => void;
   addGif?: () => void;
   addDownloadFromYouTube?: () => void;
+  addConvertToPlatform?: () => void;
   className?: string;
 }
 
@@ -100,6 +103,7 @@ export function OperationList({
   addExtractAudio,
   addGif,
   addDownloadFromYouTube,
+  addConvertToPlatform,
   className,
 }: OperationListProps) {
   const [selectValue, setSelectValue] = useState<string>(ADD_PLACEHOLDER);
@@ -127,6 +131,7 @@ export function OperationList({
       extractAudio: addExtractAudio ?? (() => onAdd({ op: "extractAudio" })),
       gif: addGif ?? (() => onAdd({ op: "gif", start_time: "00:00:00", duration: 5, fps: 10, scale: 480, output_codec: "gif" })),
       download_from_youtube: addDownloadFromYouTube ?? (() => onAdd({ op: "download_from_youtube", quality: "best", format: null, audio_only: false })),
+      convertToPlatform: addConvertToPlatform ?? (() => onAdd({ op: "convertToPlatform", platform: "generic", codec: "libx264", preset: "medium", crf: 23, audio_codec: "aac", audio_bitrate: "128k" })),
     };
     const fn = helpers[opType];
     if (fn) fn();

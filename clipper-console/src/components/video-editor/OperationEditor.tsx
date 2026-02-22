@@ -20,6 +20,7 @@ import type {
   ConcatOp,
   GifOp,
   DownloadFromYouTubeOp,
+  ConvertToPlatformOp,
 } from "@/types/edit-session";
 import { WATERMARK_POSITIONS } from "@/types/edit-session";
 import {
@@ -64,6 +65,7 @@ const OP_LABELS: Record<string, string> = {
   extractAudio: "Extract audio",
   gif: "GIF",
   download_from_youtube: "Download from YouTube",
+  convertToPlatform: "Convert to platform",
 };
 
 export function OperationEditor({ operation, onChange, onRemove, variant = "card", className }: OperationEditorProps) {
@@ -85,6 +87,7 @@ export function OperationEditor({ operation, onChange, onRemove, variant = "card
       {operation.op === "extractAudio" && <p className="text-xs text-muted-foreground">Extract audio track only. No options.</p>}
       {operation.op === "gif" && <GifEditor op={operation} onChange={(op) => onChange(op)} />}
       {operation.op === "download_from_youtube" && <YouTubeDownloadEditor op={operation} onChange={(op) => onChange(op)} />}
+      {operation.op === "convertToPlatform" && <ConvertToPlatformEditor op={operation} onChange={(op) => onChange(op)} />}
     </>
   );
 
@@ -1299,6 +1302,37 @@ function GifEditor({ op, onChange }: { op: GifOp; onChange: (op: GifOp) => void 
       <div className="space-y-1">
         <Label className="text-xs">Width (scale)</Label>
         <Input type="number" min={100} value={op.scale ?? 480} onChange={(e) => onChange({ ...op, scale: Number(e.target.value) || 480 })} className="h-8" />
+      </div>
+    </div>
+  );
+}
+
+const PLATFORM_OPTIONS = [
+  { value: "generic", label: "Generic (LinkedIn, Instagram, YouTube, etc)" },
+  { value: "linkedin", label: "LinkedIn" },
+  { value: "instagram", label: "Instagram" },
+  { value: "youtube", label: "YouTube" },
+] as const;
+
+function ConvertToPlatformEditor({ op, onChange }: { op: ConvertToPlatformOp; onChange: (op: ConvertToPlatformOp) => void }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Transcodes the output to MP4 with +faststart for upload compatibility on LinkedIn, Instagram, and similar platforms.
+      </p>
+      <div className="space-y-1">
+        <Label className="text-xs">Platform preset</Label>
+        <select
+          value={op.platform ?? "generic"}
+          onChange={(e) => onChange({ ...op, platform: e.target.value || "generic" })}
+          className="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+        >
+          {PLATFORM_OPTIONS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
+            </option>
+          ))}
+        </select>
       </div>
     </div>
   );

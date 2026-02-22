@@ -20,6 +20,7 @@ import {
   defaultExtractAudioOp,
   defaultGifOp,
   defaultDownloadFromYouTubeOp,
+  defaultConvertToPlatformOp,
 } from "@/types/edit-session";
 
 export interface EditSessionState {
@@ -109,5 +110,6 @@ export function useEditSession() {
     addExtractAudio: () => addOperation(defaultExtractAudioOp),
     addGif: () => addOperation(defaultGifOp),
     addDownloadFromYouTube: () => addOperation(defaultDownloadFromYouTubeOp),
+    addConvertToPlatform: () => addOperation(defaultConvertToPlatformOp),
   };
 }

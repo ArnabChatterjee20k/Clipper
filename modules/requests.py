@@ -9,6 +9,7 @@ from .video_processor import (
     AudioOverlay,
     BackgroundColor,
     TranscodeOptions,
+    ConvertToPlatformOptions,
 )
 from .video_downloader import YouTubeDownloadOptions
 from datetime import datetime
@@ -175,6 +176,23 @@ class DownloadFromYouTubeOp(VideoEditOperation):
         return self.model_dump(exclude=["op", "options"])
 
 
+class ConvertToPlatformOp(VideoEditOperation):
+    op: Literal["convertToPlatform"]
+    platform: Optional[str] = None
+    codec: str = "libx264"
+    preset: str = "medium"
+    crf: int = 23
+    audio_codec: str = "aac"
+    audio_bitrate: Optional[str] = "128k"
+    scale: Optional[str] = None
+    options: Optional[ConvertToPlatformOptions] = None
+
+    def get_data(self) -> Any:
+        if self.options is not None:
+            return _to_data_dict(self.options)
+        return self.model_dump(exclude=["op", "options"])
+
+
 # discriminator works only on Union and not on the list
 VideoOperationStep = Annotated[
     Union[
@@ -192,6 +210,7 @@ VideoOperationStep = Annotated[
         ExtractAudioOp,
         GifOp,
         DownloadFromYouTubeOp,
+        ConvertToPlatformOp,
     ],
     Field(discriminator="op"),
 ]
