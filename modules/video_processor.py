@@ -671,6 +671,7 @@ class VideoBuilder:
         self._karaoke_segments: list[tuple[KaraokeText, list[WordTiming]]] = []
         self._text_sequences: list[TextSequence] = []
         self._speed_segments: list[SpeedSegment] = []
+        self._ass_files_to_cleanup: list[str] = []
         self._background_audio: Optional[AudioOverlay] = None
         self._background_color: Optional[BackgroundColor] = None
         self._transcode: Optional[TranscodeOptions] = None
@@ -990,6 +991,7 @@ class VideoBuilder:
             content = self._render_karaoke_ass(data, timings, width, height)
             with open(host_path, "w", encoding="utf-8") as f:
                 f.write(content)
+            self._ass_files_to_cleanup.append(host_path)
             out_paths.append(ffmpeg_path)
         return out_paths
 
@@ -1069,8 +1071,19 @@ class VideoBuilder:
             content = self._render_text_sequence_ass(seq, width, height)
             with open(host_path, "w", encoding="utf-8") as f:
                 f.write(content)
+            self._ass_files_to_cleanup.append(host_path)
             out_paths.append(ffmpeg_path)
         return out_paths
+
+    def _cleanup_ass_files(self) -> None:
+        """Remove temporary .ass files created for karaoke/text_sequences after export."""
+        for path in self._ass_files_to_cleanup:
+            try:
+                os.unlink(path)
+                logger.debug("Cleaned up ass file: %s", path)
+            except OSError as e:
+                logger.warning("Failed to remove ass file %s: %s", path, e)
+        self._ass_files_to_cleanup.clear()
 
     def _build_filter_complex(
         self,
@@ -1471,7 +1484,7 @@ class VideoBuilder:
             o.output_codec,
         ]
 
-    async def export(self) -> AsyncGenerator[bytes, None, None]:
+    async def export(self) -> AsyncGenerator[bytes, None]:
         """Build one ffmpeg command with all filters and stream output."""
         if self._gif_options is not None:
             info = await asyncio.to_thread(
@@ -1502,14 +1515,17 @@ class VideoBuilder:
         if not info.has_audio:
             raise RuntimeError("Input has no audio stream; export requires audio")
         cmd = get_cmd(self._build(info))
-        async for chunk in execute(
-            cmd,
-            self.input_path,
-            self._chunk_size,
-            complete_callback=self.complete_callback,
-            progress_callback=self.progress_callback,
-        ):
-            yield chunk
+        try:
+            async for chunk in execute(
+                cmd,
+                self.input_path,
+                self._chunk_size,
+                complete_callback=self.complete_callback,
+                progress_callback=self.progress_callback,
+            ):
+                yield chunk
+        finally:
+            self._cleanup_ass_files()
 
     async def export_to_bytes(self) -> bytes:
         """Run export and return the whole output as bytes (full video in memory)."""
@@ -1551,7 +1567,7 @@ class VideoBuilder:
         chunk_size: int = 8192,
         complete_callback: Optional[OnCompleteCallback] = None,
         progress_callback: Optional[ProgressCallaback] = None,
-    ) -> AsyncGenerator[bytes, None, None]:
+    ) -> AsyncGenerator[bytes, None]:
         """Concatenate multiple videos (concat demuxer). Streams output to stdout.
         Requires at least 2 input paths. Uses -c copy; all inputs should have compatible codecs.
         """
