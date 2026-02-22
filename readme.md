@@ -4,10 +4,8 @@ A local-first media editor API for editing images and videos via HTTP. Upload me
 
 A generated Video using clipper (Might be muted due to md)
 
-<figure class="video_container">
-  <iframe src="scripts/clipper.mp4" frameborder="0" allowfullscreen="true"> 
-</iframe>
-</figure>
+[![Video Thumbnail](https://img.youtube.com/vi/YOUTUBE_VIDEO_ID_HERE/0.jpg)](https://youtu.be/lQhWikYnzMM)
+
 
 🔊 If audio doesn't play, [download the video](scripts/clipper.mp4).
 
